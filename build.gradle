@@ -1,0 +1,40 @@
+plugins {
+    id 'java'
+    id 'checkstyle'
+}
+
+group = 'com.eventreg'
+version = '1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+configurations {
+    checkstyleConfig
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    checkstyleConfig("com.puppycrawl.tools:checkstyle:10.18.0") {
+        transitive = false
+    }
+}
+
+checkstyle {
+    toolVersion = '10.18.0'
+    config = resources.text.fromArchiveEntry(configurations.checkstyleConfig, 'google_checks.xml')
+}
+
+test {
+    useJUnitPlatform()
+}
