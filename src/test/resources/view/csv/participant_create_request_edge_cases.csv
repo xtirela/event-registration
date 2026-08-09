@@ -1,0 +1,11 @@
+input,output
+"John,Doe,john@test.com,1,MALE","John,Doe,john@test.com,1,MALE"
+"John,Doe,john@test.com,150,MALE","John,Doe,john@test.com,150,MALE"
+"Jo,Doe,jo@test.com,25,MALE","Jo,Doe,jo@test.com,25,MALE"
+"A,B,a@b.co,25,NOT_SPECIFIED","A,B,a@b.co,25,NOT_SPECIFIED"
+"Johnnnnnnnnnnnnnnnnnnnnnnnnnn,Doe,john@test.com,25,MALE","Johnnnnnnnnnnnnnnnnnnnnnnnnnn,Doe,john@test.com,25,MALE"
+"John,Doe,john@sub.domain.com,25,MALE","John,Doe,john@sub.domain.com,25,MALE"
+"John,Doe,john+tag@test.com,25,MALE","John,Doe,john+tag@test.com,25,MALE"
+"John,Doe,john@test.com,25,male","John,Doe,john@test.com,25,MALE"
+"John,Doe,john@test.com,25,fEmAlE","John,Doe,john@test.com,25,FEMALE"
+"NULL,NULL,NULL@NULL.NULL,25,fEmAlE","NULL,NULL,NULL@NULL.NULL,25,FEMALE"
