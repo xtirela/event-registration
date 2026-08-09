@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class EventRegRequest {
 
-    private int participantId;
-    private int eventId;
-
+  private int participantId;
+  private int eventId;
 }

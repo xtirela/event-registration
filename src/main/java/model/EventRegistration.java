@@ -6,15 +6,13 @@ import model.enums.EventRegRequestStatus;
 
 @Data
 @Builder
-public class EventRegistration
-{
-    private int id;
+public class EventRegistration {
+  private int id;
 
-    private int participantId;
+  private int participantId;
 
-    private int eventId;
+  private int eventId;
 
-    private EventRegRequestStatus eventRegRequestStatus;
-    @Builder.Default
-    private String description = "none";
+  private EventRegRequestStatus eventRegRequestStatus;
+  @Builder.Default private String description = "none";
 }

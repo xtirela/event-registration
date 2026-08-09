@@ -10,11 +10,10 @@ import model.enums.ParticipantGender;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ParticipantCreateRequest
-{
-    private String firstName;
-    private String lastName;
-    private String email;
-    private int age;
-    private ParticipantGender participantGender;
+public class ParticipantCreateRequest {
+  private String firstName;
+  private String lastName;
+  private String email;
+  private int age;
+  private ParticipantGender participantGender;
 }

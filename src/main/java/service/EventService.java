@@ -1,29 +1,30 @@
 package service;
 
 import dto.*;
+import java.util.List;
 
-import java.util.List;;
+public interface EventService {
+  EventResponse createEvent(EventCreateRequest eventCreateRequest);
 
-public interface EventService
-{
-    EventResponse createEvent(EventCreateRequest eventCreateRequest);
+  ParticipantResponse createParticipant(ParticipantCreateRequest participantCreateRequest);
 
-    ParticipantResponse createParticipant(ParticipantCreateRequest participantCreateRequest);
+  EventRegResponse registerParticipant(EventRegRequest eventRegRequest);
 
-    EventRegResponse registerParticipant(EventRegRequest eventRegRequest);
+  EventRegResponse cancelRegistration(CancelRegRequest cancelRegRequest);
 
-    EventRegResponse cancelRegistration(CancelRegRequest cancelRegRequest);
+  List<ParticipantResponse> getParticipants();
 
-    List<ParticipantResponse> getParticipants();
-    ParticipantResponse getParticipantById(int participantId);
+  ParticipantResponse getParticipantById(int participantId);
 
-    List<EventResponse> getEvents();
-    EventResponse getEventById(int eventId);
+  List<EventResponse> getEvents();
 
-    List<EventRegResponse> getRegistrationRequests();
-    EventRegResponse getRegistrationRequestById(int eventRegistrationId);
+  EventResponse getEventById(int eventId);
 
-    List<ParticipantEventPair> getRegisteredParticipant(Integer participantId);
-    List<ParticipantEventPair> getAllRegisteredParticipants();
+  List<EventRegResponse> getRegistrationRequests();
 
+  EventRegResponse getRegistrationRequestById(int eventRegistrationId);
+
+  List<ParticipantEventPair> getRegisteredParticipant(Integer participantId);
+
+  List<ParticipantEventPair> getAllRegisteredParticipants();
 }
