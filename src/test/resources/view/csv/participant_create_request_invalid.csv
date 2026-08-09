@@ -1,0 +1,9 @@
+input, output
+"John,Doe,john@testcom,25,MALE","John,Doe,john@testcom,25,MALE"
+" ,null,jane@test.com,30,FEMALE"," ,null,jane@test.com,30,FEMALE"
+"Bob,Smith,bob@test.com,-1,MALE","Bob,Smith,bob@test.com,-1,MALE"
+"Bob,,bob@test.com,40,MALE","Bob,,bob@test.com,40,MALE"
+"Bob,Smith,bob@test.com,400,MALE","Bob,Smith,bob@test.com,400,MALE"
+"Bob,Smith,bob@test.com,40,EMALE","Bob,Smith,bob@test.com,40,EMALE"
+"Bob,Smith,bob.test.com,40,MALE","Bob,Smith,bob.test.com,40,MALE"
+
