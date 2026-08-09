@@ -1,6 +1,8 @@
 plugins {
     id 'java'
     id 'checkstyle'
+    id 'application'
+    id("com.diffplug.spotless") version "8.9.0"
 }
 
 group = 'com.eventreg'
@@ -10,6 +12,10 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
     }
+}
+
+application {
+    mainClass = 'view.Main'
 }
 
 configurations {
@@ -25,6 +31,12 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
+    compileOnly 'org.projectlombok:lombok:1.18.46'
+    annotationProcessor 'org.projectlombok:lombok:1.18.46'
+
+    testCompileOnly 'org.projectlombok:lombok:1.18.46'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.46'
+
     checkstyleConfig("com.puppycrawl.tools:checkstyle:10.18.0") {
         transitive = false
     }
@@ -35,6 +47,16 @@ checkstyle {
     config = resources.text.fromArchiveEntry(configurations.checkstyleConfig, 'google_checks.xml')
 }
 
+spotless {
+    java {
+        googleJavaFormat()
+    }
+}
+
 test {
     useJUnitPlatform()
+}
+
+run {
+    standardInput = System.in
 }

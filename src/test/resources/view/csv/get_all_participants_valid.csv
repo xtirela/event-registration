@@ -1,0 +1,4 @@
+participantCreateInput1,participantCreateInput2,expectedOutput
+"John,Doe,john@test.com,25,MALE","Jane,Doe,jane@test.com,30,FEMALE","2"
+"Bob,Smith,bob@test.com,40,MALE","Alice,Johnson,alice@test.com,28,FEMALE","2"
+"Mike,Davis,mike@test.com,35,MALE","Sarah,Taylor,sarah@test.com,27,FEMALE","2"
