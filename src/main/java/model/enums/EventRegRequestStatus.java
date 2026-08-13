@@ -6,7 +6,8 @@ public enum EventRegRequestStatus {
   DENIED,
   CANCELLED,
   NOT_FOUND,
-  DEPRECATED;
+  DEPRECATED,
+  WAITING;
 
   public static EventRegRequestStatus fromString(String input) {
     if (input == null) return null;

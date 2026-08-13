@@ -14,5 +14,5 @@ public class Participant {
   private String email;
   private int age;
   private ParticipantGender participantGender;
-  private OffsetDateTime createdAt;
+  private OffsetDateTime registeredAt;
 }
