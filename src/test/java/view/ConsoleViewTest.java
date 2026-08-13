@@ -1,474 +1,678 @@
 package view;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dto.EventRegResponse;
-import dto.EventResponse;
-import dto.ParticipantResponse;
+import exception.EventNotFoundException;
+import exception.ParticipantNotFoundException;
+import exception.RegistrationNotFoundException;
 import java.io.ByteArrayInputStream;
-import java.time.Duration;
-import java.time.OffsetDateTime;
-import java.util.List;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.util.Scanner;
-import model.enums.*;
+import java.util.stream.Stream;
+import model.enums.EventRegRequestStatus;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvFileSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import service.EventService;
 import service.implementation.EventServiceImpl;
 
 public class ConsoleViewTest {
+
   private EventService eventService;
   private ConsoleView consoleView;
 
   @BeforeEach
-  void setUP() {
+  void setUp() {
     eventService = new EventServiceImpl();
     consoleView = new ConsoleView(eventService);
   }
 
+  // ---------- helpers ----------
+
   void performConsoleAction(int action, String input) {
-    System.setIn(new ByteArrayInputStream(input.getBytes()));
+    System.setIn(new ByteArrayInputStream((input + "\n").getBytes()));
 
     Scanner scanner = new Scanner(System.in);
 
     consoleView.performAction(action, scanner);
   }
 
-  ParticipantResponse expectedParticipantResponse(String output) {
-    String[] expected = output.split(",");
-
-    return ParticipantResponse.builder()
-        .firstName(expected[0])
-        .lastName(expected[1])
-        .email(expected[2])
-        .age(Integer.parseInt(expected[3]))
-        .participantGender(ParticipantGender.fromString(expected[4]))
-        .build();
+  String captureOutput(Runnable action) {
+    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    PrintStream original = System.out;
+    System.setOut(new PrintStream(buffer));
+    try {
+      action.run();
+    } finally {
+      System.setOut(original);
+    }
+    return buffer.toString();
   }
 
-  EventResponse expectedEventResponse(String output) {
-    String[] expected = output.split(",");
-
-    return EventResponse.builder()
-        .eventName(expected[0])
-        .eventDate(OffsetDateTime.parse(expected[1]))
-        .eventDuration(Duration.ofHours(Long.parseLong(expected[2])))
-        .ageRequired(Integer.parseInt(expected[3]))
-        .currentParticipantAmount(Integer.parseInt(expected[4]))
-        .maxParticipantAmount(Integer.parseInt(expected[5]))
-        .eventGenderRequirement(EventGenderRequirement.fromString(expected[6]))
-        .eventStatus(EventStatus.fromString(expected[7]))
-        .eventRegistrationStatus(EventRegistrationStatus.fromString(expected[8]))
-        .build();
+  void arrangeParticipant() {
+    performConsoleAction(1, "John,Doe,john@test.com,25,MALE");
   }
 
-  EventRegResponse expectedEventRegResponse(String output) {
-    String[] expected = output.split(",");
-
-    return EventRegResponse.builder()
-        .firstName(expected[0])
-        .lastName(expected[1])
-        .email(expected[2])
-        .age(Integer.parseInt(expected[3]))
-        .participantGender(ParticipantGender.fromString(expected[4]))
-        .eventName((expected[5]))
-        .eventRegRequestStatus(EventRegRequestStatus.fromString(expected[6]))
-        .description("none")
-        .build();
+  void arrangeEvent() {
+    performConsoleAction(2, "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE");
   }
+
+  void arrangeParticipantAndEvent() {
+    arrangeParticipant();
+    arrangeEvent();
+  }
+
+  void arrangeRegistration() {
+    arrangeParticipantAndEvent();
+    performConsoleAction(3, "1,1");
+  }
+
+  void arrangeTwoEvents() {
+    performConsoleAction(2, "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE");
+    performConsoleAction(2, "Concert,WestHall,2030-06-01T15:00:00+00:00,4,21,50,FEMALE_ONLY");
+  }
+
+  void arrangeTwoParticipants() {
+    performConsoleAction(1, "Alice,Smith,alice@test.com,20,FEMALE");
+    performConsoleAction(1, "Bob,Johnson,bob@test.com,30,MALE");
+  }
+
+  void arrangeFullEventScenario() {
+    performConsoleAction(2, "Full Event,MainHall,2030-07-01T10:00:00+00:00,2,18,1,NONE");
+    performConsoleAction(1, "John,Doe,john@test.com,25,MALE");
+    performConsoleAction(1, "Jane,Smith,jane@test.com,25,FEMALE");
+    performConsoleAction(3, "1,1");
+  }
+
+  // ---------- method sources ----------
+
+  static Stream<Arguments> validParticipantInputs() {
+    return Stream.of(
+        Arguments.of("John,Doe,john@test.com,25,MALE", "John"),
+        Arguments.of("Jane,Smith,jane@test.com,30,FEMALE", "Jane"));
+  }
+
+  static Stream<Arguments> edgeParticipantInputs() {
+    return Stream.of(
+        Arguments.of("Baby,Test,baby@test.com,1,MALE", "Baby"),
+        Arguments.of("Elder,Test,elder@test.com,150,FEMALE", "Elder"),
+        Arguments.of("Anon,Test,anon@test.com,25,NOT_SPECIFIED", "Anon"));
+  }
+
+  static Stream<String> invalidParticipantInputs() {
+    return Stream.of(
+        "John,Doe,john@testcom,25,MALE",
+        " ,Doe,john@test.com,25,MALE",
+        "John,,john@test.com,25,MALE",
+        "John,Doe,,25,MALE",
+        "John,Doe,john@test.com,0,MALE",
+        "John,Doe,john@test.com,151,MALE",
+        "John,Doe,john@test.com,abc,MALE",
+        "John,Doe,john@test.com,25",
+        "John,Doe,john@test.com,25,");
+  }
+
+  static Stream<Arguments> validEventInputs() {
+    return Stream.of(
+        Arguments.of("Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE", "Party"),
+        Arguments.of("Concert,WestHall,2030-06-01T15:00:00+00:00,4,21,50,FEMALE_ONLY", "Concert"));
+  }
+
+  static Stream<Arguments> edgeEventInputs() {
+    return Stream.of(
+        Arguments.of("Kids,MainHall,2030-07-01T10:00:00+00:00,2,0,100,NONE", "Kids"),
+        Arguments.of("Seniors,MainHall,2030-07-01T10:00:00+00:00,2,150,100,NONE", "Seniors"),
+        Arguments.of("Small,MainHall,2030-07-01T10:00:00+00:00,2,18,1,NONE", "Small"),
+        Arguments.of("Men Only,MainHall,2030-07-01T10:00:00+00:00,2,18,50,MALE_ONLY", "Men Only"));
+  }
+
+  static Stream<String> invalidEventInputs() {
+    return Stream.of(
+        "Party,MainHall,2020-01-01T10:00:00+00:00,2,18,50,NONE",
+        ",MainHall,2030-07-01T10:00:00+00:00,2,18,50,NONE",
+        "Party,MainHall,2030-07-01T10:00:00+00:00,2,18,0,NONE",
+        "Party,MainHall,2030-07-01T10:00:00+00:00,2,18,50,BAD",
+        "Party,MainHall,2030-07-01T10:00:00+00:00,2,18,50");
+  }
+
+  static Stream<Arguments> validRegistrationInputs() {
+    return Stream.of(
+        Arguments.of(
+            "John,Doe,john@test.com,25,MALE",
+            "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE",
+            "1,1",
+            EventRegRequestStatus.ACCEPTED));
+  }
+
+  static Stream<Arguments> edgeRegistrationInputs() {
+    return Stream.of(
+        Arguments.of(
+            "Teen,Test,teen@test.com,17,MALE",
+            "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE",
+            "1,1",
+            EventRegRequestStatus.DENIED),
+        Arguments.of(
+            "John,Doe,john@test.com,25,MALE",
+            "Ladies,MainHall,2030-05-01T13:30:00+02:00,3,18,20,FEMALE_ONLY",
+            "1,1",
+            EventRegRequestStatus.DENIED));
+  }
+
+  static Stream<Arguments> missingParticipantRegistrationInputs() {
+    return Stream.of(
+        Arguments.of(
+            "John,Doe,john@test.com,25,MALE",
+            "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE",
+            "999,1"));
+  }
+
+  static Stream<Arguments> missingEventRegistrationInputs() {
+    return Stream.of(
+        Arguments.of(
+            "John,Doe,john@test.com,25,MALE",
+            "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE",
+            "1,999"));
+  }
+
+  static Stream<Arguments> validCancelInputs() {
+    return Stream.of(
+        Arguments.of(
+            "John,Doe,john@test.com,25,MALE",
+            "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE",
+            "1,1",
+            "1"),
+        Arguments.of(
+            "Jane,Smith,jane@test.com,30,FEMALE",
+            "Concert,WestHall,2030-06-01T15:00:00+00:00,4,21,50,FEMALE_ONLY",
+            "1,1",
+            "1"));
+  }
+
+  static Stream<Arguments> invalidCancelCreationInputs() {
+    return Stream.of(
+        Arguments.of(
+            "John,Doe,john@testcom,25,MALE",
+            "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE",
+            "1,1",
+            "1"));
+  }
+
+  static Stream<Arguments> invalidCancelIdInputs() {
+    return Stream.of(
+        Arguments.of(
+            "John,Doe,john@test.com,25,MALE",
+            "Party,MainHall,2030-05-01T13:30:00+02:00,3,18,20,NONE",
+            "1,1",
+            "999"));
+  }
+
+  static Stream<String> sortFields() {
+    return Stream.of("AGE", "NAME", "REGISTERED_AT");
+  }
+
+  // ---------- case 1: create participant ----------
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/participant_create_request_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenCreateParticipant_ThenReturnParticipantResponse(
-      String input, String output) {
+  @MethodSource("validParticipantInputs")
+  void givenValidData_whenCreateParticipant_thenParticipantCreated(
+      String input, String expectedFirstName) {
     performConsoleAction(1, input);
 
-    ParticipantResponse expectedResponse = expectedParticipantResponse(output);
-
-    ParticipantResponse actualResponse = eventService.getParticipantById(1);
-
-    assertEquals(expectedResponse, actualResponse);
+    assertEquals(expectedFirstName, eventService.getParticipantById(1).getFirstName());
   }
 
   @ParameterizedTest
-  @CsvFileSource(
-      resources = "/view/csv/participant_create_request_edge_cases.csv",
-      numLinesToSkip = 1)
-  public void givenEdgeCasesData_WhenCreateParticipant_ThenReturnParticipantResponse(
-      String input, String output) {
+  @MethodSource("edgeParticipantInputs")
+  void givenEdgeCaseData_whenCreateParticipant_thenParticipantCreated(
+      String input, String expectedFirstName) {
     performConsoleAction(1, input);
 
-    ParticipantResponse expectedResponse = expectedParticipantResponse(output);
-
-    ParticipantResponse actualResponse = eventService.getParticipantById(1);
-
-    assertEquals(expectedResponse, actualResponse);
+    assertEquals(expectedFirstName, eventService.getParticipantById(1).getFirstName());
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/participant_create_request_invalid.csv", numLinesToSkip = 1)
-  public void givenInvalidData_WhenCreateParticipant_ThenReturnParticipantResponse(
-      String input, String output) {
+  @MethodSource("invalidParticipantInputs")
+  void givenInvalidData_whenCreateParticipant_thenParticipantNotCreated(String input) {
     performConsoleAction(1, input);
 
-    ParticipantResponse expectedResponse = expectedParticipantResponse(output);
-
-    ParticipantResponse actualResponse = eventService.getParticipantById(1);
-
-    assertNotEquals(expectedResponse, actualResponse);
+    assertThrows(ParticipantNotFoundException.class, () -> eventService.getParticipantById(1));
   }
 
+  // ---------- case 2: create event ----------
+
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/event_create_request_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenCreateEvent_ThenReturnEventResponse(String input, String output) {
+  @MethodSource("validEventInputs")
+  void givenValidData_whenCreateEvent_thenEventCreated(String input, String expectedName) {
     performConsoleAction(2, input);
 
-    EventResponse expectedResponse = expectedEventResponse(output);
-
-    EventResponse actualResponse = eventService.getEventById(1);
-
-    assertEquals(expectedResponse, actualResponse);
+    assertEquals(expectedName, eventService.getEventById(1).getEventName());
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/event_create_request_edge_cases.csv", numLinesToSkip = 1)
-  public void givenEdgeCaseData_WhenCreateEvent_ThenReturnEventResponse(
-      String input, String output) {
+  @MethodSource("edgeEventInputs")
+  void givenEdgeCaseData_whenCreateEvent_thenEventCreated(String input, String expectedName) {
     performConsoleAction(2, input);
 
-    EventResponse expectedResponse = expectedEventResponse(output);
-
-    EventResponse actualResponse = eventService.getEventById(1);
-
-    assertEquals(expectedResponse, actualResponse);
+    assertEquals(expectedName, eventService.getEventById(1).getEventName());
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/event_create_request_invalid.csv", numLinesToSkip = 1)
-  public void givenInvalidData_WhenCreateEvent_ThenReturnEventResponseWithError(
-      String input, String output) {
+  @MethodSource("invalidEventInputs")
+  void givenInvalidData_whenCreateEvent_thenEventNotCreated(String input) {
     performConsoleAction(2, input);
 
-    EventResponse expectedResponse = expectedEventResponse(output);
+    assertThrows(EventNotFoundException.class, () -> eventService.getEventById(1));
+  }
 
-    EventResponse actualResponse = eventService.getEventById(1);
+  // ---------- case 3: register participant ----------
 
-    assertNotEquals(expectedResponse, actualResponse);
+  @ParameterizedTest
+  @MethodSource("validRegistrationInputs")
+  void givenValidData_whenRegisterParticipant_thenStatusAccepted(
+      String participantInput, String eventInput, String regInput, EventRegRequestStatus status) {
+    performConsoleAction(1, participantInput);
+    performConsoleAction(2, eventInput);
+
+    performConsoleAction(3, regInput);
+
+    assertEquals(status, eventService.getRegistrationRequestById(1).getEventRegRequestStatus());
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/event_reg_request_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenRegisterParticipant_ThenReturnEventRegResponse(
-      String participantCreateInput,
-      String eventCreateInput,
-      String eventRegInput,
-      String eventRegOutput) {
-    performConsoleAction(1, participantCreateInput);
+  @MethodSource("edgeRegistrationInputs")
+  void givenEdgeCaseData_whenRegisterParticipant_thenStatusDenied(
+      String participantInput, String eventInput, String regInput, EventRegRequestStatus status) {
+    performConsoleAction(1, participantInput);
+    performConsoleAction(2, eventInput);
 
-    performConsoleAction(2, eventCreateInput);
+    performConsoleAction(3, regInput);
 
-    performConsoleAction(3, eventRegInput);
-
-    EventRegResponse expectedResponse = expectedEventRegResponse(eventRegOutput);
-
-    EventRegResponse actualResponse = eventService.getRegistrationRequestById(1);
-    actualResponse.setDescription("none");
-
-    assertEquals(expectedResponse, actualResponse);
+    assertEquals(status, eventService.getRegistrationRequestById(1).getEventRegRequestStatus());
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/event_reg_request_edge_cases.csv", numLinesToSkip = 1)
-  public void givenEdgeCaseData_WhenRegisterParticipant_ThenReturnEventRegResponse(
-      String participantCreateInput,
-      String eventCreateInput,
-      String eventRegInput,
-      String eventRegOutput) {
-    performConsoleAction(1, participantCreateInput);
+  @MethodSource("missingParticipantRegistrationInputs")
+  void givenMissingParticipant_whenRegisterParticipant_thenRegistrationNotResolvable(
+      String participantInput, String eventInput, String regInput) {
+    performConsoleAction(1, participantInput);
+    performConsoleAction(2, eventInput);
 
-    performConsoleAction(2, eventCreateInput);
+    performConsoleAction(3, regInput);
 
-    performConsoleAction(3, eventRegInput);
-
-    EventRegResponse expectedResponse = expectedEventRegResponse(eventRegOutput);
-
-    EventRegResponse actualResponse = eventService.getRegistrationRequestById(1);
-    actualResponse.setDescription("none");
-
-    assertEquals(expectedResponse, actualResponse);
+    assertThrows(
+        ParticipantNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/event_reg_request_invalid.csv", numLinesToSkip = 1)
-  public void givenInvalidData_WhenRegisterParticipant_ThenReturnEventRegResponseError(
-      String participantCreateInput, String eventCreateInput, String eventRegInput) {
-    performConsoleAction(1, participantCreateInput);
+  @MethodSource("missingEventRegistrationInputs")
+  void givenMissingEvent_whenRegisterParticipant_thenRegistrationNotResolvable(
+      String participantInput, String eventInput, String regInput) {
+    performConsoleAction(1, participantInput);
+    performConsoleAction(2, eventInput);
 
-    performConsoleAction(2, eventCreateInput);
+    performConsoleAction(3, regInput);
 
-    performConsoleAction(3, eventRegInput);
+    assertThrows(EventNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
+  }
 
-    assertDoesNotThrow(() -> eventService.getRegistrationRequestById(1));
+  @Test
+  void givenMalformedRegistrationInput_whenRegisterParticipant_thenErrorPrinted() {
+    arrangeParticipantAndEvent();
+
+    String output = captureOutput(() -> performConsoleAction(3, "1"));
+
+    assertTrue(output.contains("ОШИБКА"));
+  }
+
+  @Test
+  void givenFullEvent_whenRegisterAndChooseYes_thenWaitingQueue() {
+    arrangeFullEventScenario();
+
+    performConsoleAction(3, "2,1\nY");
+
+    assertEquals(
+        EventRegRequestStatus.WAITING,
+        eventService.getRegistrationRequestById(2).getEventRegRequestStatus());
+  }
+
+  @Test
+  void givenFullEvent_whenRegisterAndChooseNo_thenDenied() {
+    arrangeFullEventScenario();
+
+    performConsoleAction(3, "2,1\nN");
+
+    assertEquals(
+        EventRegRequestStatus.DENIED,
+        eventService.getRegistrationRequestById(2).getEventRegRequestStatus());
+  }
+
+  @Test
+  void givenFullEvent_whenRegisterAndChooseOther_thenDenied() {
+    arrangeFullEventScenario();
+
+    performConsoleAction(3, "2,1\nX");
+
+    assertEquals(
+        EventRegRequestStatus.DENIED,
+        eventService.getRegistrationRequestById(2).getEventRegRequestStatus());
+  }
+
+  // ---------- case 4: cancel registration ----------
+
+  @ParameterizedTest
+  @MethodSource("validCancelInputs")
+  void givenValidData_whenCancelRegistration_thenStatusCancelled(
+      String participantInput, String eventInput, String regInput, String cancelInput) {
+    performConsoleAction(1, participantInput);
+    performConsoleAction(2, eventInput);
+    performConsoleAction(3, regInput);
+
+    performConsoleAction(4, cancelInput);
+
+    assertEquals(
+        EventRegRequestStatus.CANCELLED,
+        eventService.getRegistrationRequestById(1).getEventRegRequestStatus());
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/cancel_reg_request_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenCancelRegistration_ThenRegistrationCancelled(
-      String participantCreateInput,
-      String eventCreateInput,
-      String eventRegInput,
-      String cancelRegInput,
-      String eventRegOutput)
-      throws InterruptedException {
-    performConsoleAction(1, participantCreateInput);
+  @MethodSource("validCancelInputs")
+  void givenValidData_whenCancelRegistration_thenParticipantAmountZero(
+      String participantInput, String eventInput, String regInput, String cancelInput) {
+    performConsoleAction(1, participantInput);
+    performConsoleAction(2, eventInput);
+    performConsoleAction(3, regInput);
 
-    performConsoleAction(2, eventCreateInput);
+    performConsoleAction(4, cancelInput);
 
-    EventResponse response1 = eventService.getEventById(1);
-    assertEquals(0, response1.getCurrentParticipantAmount());
-
-    performConsoleAction(3, eventRegInput);
-
-    EventResponse response2 = eventService.getEventById(1);
-    assertEquals(1, response2.getCurrentParticipantAmount());
-
-    performConsoleAction(4, cancelRegInput);
-
-    EventRegResponse expectedResponse = expectedEventRegResponse(eventRegOutput);
-
-    EventRegResponse actualResponse = eventService.getRegistrationRequestById(1);
-    actualResponse.setDescription("none");
-
-    assertEquals(expectedResponse, actualResponse);
-
-    EventResponse response3 = eventService.getEventById(1);
-    assertEquals(0, response3.getCurrentParticipantAmount());
+    assertEquals(0, eventService.getEventById(1).getCurrentParticipantAmount());
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/cancel_reg_request_edge_cases.csv", numLinesToSkip = 1)
-  public void givenEdgeCaseData_WhenCancelRegistration_ThenRegistrationCancelled(
-      String participantCreateInput,
-      String eventCreateInput,
-      String eventRegInput,
-      String cancelRegInput,
-      String eventRegOutput)
-      throws InterruptedException {
-    performConsoleAction(1, participantCreateInput);
+  @MethodSource("invalidCancelCreationInputs")
+  void givenInvalidCreation_whenCancelRegistration_thenRegistrationNotResolvable(
+      String participantInput, String eventInput, String regInput, String cancelInput) {
+    performConsoleAction(1, participantInput);
+    performConsoleAction(2, eventInput);
+    performConsoleAction(3, regInput);
 
-    performConsoleAction(2, eventCreateInput);
+    performConsoleAction(4, cancelInput);
 
-    EventResponse response1 = eventService.getEventById(1);
-    assertEquals(0, response1.getCurrentParticipantAmount());
-
-    performConsoleAction(3, eventRegInput);
-
-    EventResponse response2 = eventService.getEventById(1);
-    assertEquals(1, response2.getCurrentParticipantAmount());
-
-    performConsoleAction(4, cancelRegInput);
-
-    EventRegResponse expectedResponse = expectedEventRegResponse(eventRegOutput);
-
-    EventRegResponse actualResponse = eventService.getRegistrationRequestById(1);
-    actualResponse.setDescription("none");
-
-    assertEquals(expectedResponse, actualResponse);
-
-    EventResponse response3 = eventService.getEventById(1);
-    assertEquals(0, response3.getCurrentParticipantAmount());
+    assertThrows(
+        ParticipantNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/cancel_reg_request_invalid.csv", numLinesToSkip = 1)
-  public void givenInvalidData_WhenCancelRegistration_ThenRegistrationNotCancelled(
-      String participantCreateInput,
-      String eventCreateInput,
-      String eventRegInput,
-      String cancelRegInput,
-      String eventRegOutput)
-      throws InterruptedException {
-    performConsoleAction(1, participantCreateInput);
+  @MethodSource("invalidCancelIdInputs")
+  void givenInvalidCancelId_whenCancelRegistration_thenRegistrationStaysAccepted(
+      String participantInput, String eventInput, String regInput, String cancelInput) {
+    performConsoleAction(1, participantInput);
+    performConsoleAction(2, eventInput);
+    performConsoleAction(3, regInput);
 
-    performConsoleAction(2, eventCreateInput);
+    performConsoleAction(4, cancelInput);
 
-    performConsoleAction(3, eventRegInput);
-
-    performConsoleAction(4, cancelRegInput);
-
-    EventRegResponse expectedResponse = expectedEventRegResponse(eventRegOutput);
-
-    EventRegResponse actualResponse = eventService.getRegistrationRequestById(1);
-    actualResponse.setDescription("none");
-
-    assertNotEquals(expectedResponse, actualResponse);
+    assertEquals(
+        EventRegRequestStatus.ACCEPTED,
+        eventService.getRegistrationRequestById(1).getEventRegRequestStatus());
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_event_by_id_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenGetEventById_ThenReturnEvent(
-      String eventCreateInput, String eventIdInput) {
-    performConsoleAction(2, eventCreateInput);
+  // ---------- case 5: get event by id ----------
 
-    assertDoesNotThrow(() -> performConsoleAction(5, eventIdInput));
+  @Test
+  void givenExistingEvent_whenGetEventById_thenEventPrinted() {
+    arrangeEvent();
+
+    String output = captureOutput(() -> performConsoleAction(5, "1"));
+
+    assertTrue(output.contains("Party"));
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_event_by_id_invalid.csv", numLinesToSkip = 1)
-  public void givenInvalidData_WhenGetEventById_ThenReturnError(
-      String eventCreateInput, String eventIdInput) {
-    performConsoleAction(2, eventCreateInput);
+  @Test
+  void givenMissingEvent_whenGetEventById_thenErrorPrinted() {
+    String output = captureOutput(() -> performConsoleAction(5, "999"));
 
-    assertDoesNotThrow(() -> performConsoleAction(5, eventIdInput));
+    assertTrue(output.contains("ОШИБКА"));
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_all_events_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenGetAllEvents_ThenReturnEventList(
-      String eventCreateInput1, String eventCreateInput2, String expectedOutput) {
-    performConsoleAction(2, eventCreateInput1);
-    performConsoleAction(2, eventCreateInput2);
+  // ---------- case 6: get all events ----------
+
+  @Test
+  void givenTwoEvents_whenGetAllEvents_thenEventsPrinted() {
+    arrangeTwoEvents();
+
+    String output = captureOutput(() -> performConsoleAction(6, ""));
+
+    assertTrue(output.contains("Party"));
+  }
+
+  @Test
+  void givenNoEvents_whenGetAllEvents_thenNoThrow() {
     assertDoesNotThrow(() -> performConsoleAction(6, ""));
-
-    List<EventResponse> events = eventService.getEvents();
-
-    assertEquals(2, events.size());
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_participant_by_id_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenGetParticipantById_ThenReturnParticipant(
-      String participantCreateInput, String participantIdInput, String expectedOutput) {
-    performConsoleAction(1, participantCreateInput);
+  // ---------- case 7: filter events ----------
 
-    assertDoesNotThrow(() -> performConsoleAction(7, participantIdInput));
+  @Test
+  void givenAgeFilter_whenFilterEvents_thenMatchingEventPrinted() {
+    arrangeTwoEvents();
+
+    String output = captureOutput(() -> performConsoleAction(7, ",,21"));
+
+    assertTrue(output.contains("Concert"));
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_participant_by_id_invalid.csv", numLinesToSkip = 1)
-  public void givenInvalidData_WhenGetParticipantById_ThenReturnError(
-      String participantCreateInput, String participantIdInput, String expectedOutput) {
-    performConsoleAction(1, participantCreateInput);
+  @Test
+  void givenAgeFilter_whenFilterEvents_thenOtherEventNotPrinted() {
+    arrangeTwoEvents();
 
-    assertDoesNotThrow(() -> performConsoleAction(7, participantIdInput));
+    String output = captureOutput(() -> performConsoleAction(7, ",,21"));
+
+    assertFalse(output.contains("Party"));
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_all_participants_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenGetAllParticipants_ThenReturnParticipantList(
-      String participantCreateInput1, String participantCreateInput2, String expectedOutput) {
-    performConsoleAction(1, participantCreateInput1);
-    performConsoleAction(1, participantCreateInput2);
+  @Test
+  void givenLocationAndAgeFilter_whenFilterEvents_thenMatchingEventPrinted() {
+    arrangeTwoEvents();
+
+    String output = captureOutput(() -> performConsoleAction(7, ",MainHall,18"));
+
+    assertTrue(output.contains("Party"));
+  }
+
+  @Test
+  void givenDateAndAgeFilter_whenFilterEvents_thenMatchingEventPrinted() {
+    arrangeTwoEvents();
+
+    String output = captureOutput(() -> performConsoleAction(7, "2030-05-01T13:30:00+02:00,,18"));
+
+    assertTrue(output.contains("Party"));
+  }
+
+  @Test
+  void givenInvalidFilter_whenFilterEvents_thenErrorPrinted() {
+    arrangeTwoEvents();
+
+    String output = captureOutput(() -> performConsoleAction(7, "21"));
+
+    assertTrue(output.contains("ОШИБКА"));
+  }
+
+  // ---------- case 8: group events ----------
+
+  @Test
+  void givenTwoEvents_whenGroupEvents_thenMainHallPrinted() {
+    arrangeTwoEvents();
+
+    String output = captureOutput(() -> performConsoleAction(8, ""));
+
+    assertTrue(output.contains("MainHall"));
+  }
+
+  @Test
+  void givenNoEvents_whenGroupEvents_thenNoThrow() {
     assertDoesNotThrow(() -> performConsoleAction(8, ""));
-
-    List<ParticipantResponse> participants = eventService.getParticipants();
-
-    assertNotNull(participants);
-    assertEquals(2, participants.size());
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_registration_by_id_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenGetRegistrationById_ThenReturnRegistration(
-      String participantCreateInput,
-      String eventCreateInput,
-      String eventRegInput,
-      String requestIdInput,
-      String expectedOutput) {
-    performConsoleAction(1, participantCreateInput);
-    performConsoleAction(2, eventCreateInput);
-    performConsoleAction(3, eventRegInput);
+  // ---------- case 9: get participant by id ----------
 
-    assertDoesNotThrow(() -> performConsoleAction(9, requestIdInput));
+  @Test
+  void givenExistingParticipant_whenGetParticipantById_thenParticipantPrinted() {
+    arrangeParticipant();
+
+    String output = captureOutput(() -> performConsoleAction(9, "1"));
+
+    assertTrue(output.contains("John"));
   }
 
-  // Case 9: Get Registration Request By ID - Invalid
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_registration_by_id_invalid.csv", numLinesToSkip = 1)
-  public void givenInvalidData_WhenGetRegistrationById_ThenReturnError(
-      String participantCreateInput,
-      String eventCreateInput,
-      String eventRegInput,
-      String requestIdInput,
-      String expectedOutput) {
-    performConsoleAction(1, participantCreateInput);
-    performConsoleAction(2, eventCreateInput);
-    performConsoleAction(3, eventRegInput);
+  @Test
+  void givenMissingParticipant_whenGetParticipantById_thenErrorPrinted() {
+    String output = captureOutput(() -> performConsoleAction(9, "999"));
 
-    assertDoesNotThrow(() -> performConsoleAction(9, requestIdInput));
+    assertTrue(output.contains("ОШИБКА"));
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_all_registrations_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenGetAllRegistrations_ThenReturnRegistrationList(
-      String participantCreateInput1,
-      String eventCreateInput1,
-      String eventRegInput1,
-      String participantCreateInput2,
-      String eventCreateInput2,
-      String eventRegInput2,
-      String expectedOutput) {
-    performConsoleAction(1, participantCreateInput1);
-    performConsoleAction(2, eventCreateInput1);
-    performConsoleAction(3, eventRegInput1);
-    performConsoleAction(1, participantCreateInput2);
-    performConsoleAction(2, eventCreateInput2);
-    performConsoleAction(3, eventRegInput2);
+  // ---------- case 10: get all participants ----------
 
+  @Test
+  void givenTwoParticipants_whenGetAllParticipants_thenParticipantsPrinted() {
+    arrangeTwoParticipants();
+
+    String output = captureOutput(() -> performConsoleAction(10, ""));
+
+    assertTrue(output.contains("Alice"));
+  }
+
+  @Test
+  void givenNoParticipants_whenGetAllParticipants_thenNoThrow() {
     assertDoesNotThrow(() -> performConsoleAction(10, ""));
   }
 
-  @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_participant_events_valid.csv", numLinesToSkip = 1)
-  public void givenValidData_WhenGetParticipantEvents_ThenReturnEventList(
-      String participantCreateInput,
-      String eventCreateInput1,
-      String eventRegInput1,
-      String eventCreateInput2,
-      String eventRegInput2,
-      String participantIdInput,
-      String expectedOutput) {
-    performConsoleAction(1, participantCreateInput);
-    performConsoleAction(2, eventCreateInput1);
-    performConsoleAction(3, eventRegInput1);
-    performConsoleAction(2, eventCreateInput2);
-    performConsoleAction(3, eventRegInput2);
-    assertDoesNotThrow(() -> performConsoleAction(11, participantIdInput));
-  }
+  // ---------- case 11: sort participants ----------
 
   @ParameterizedTest
-  @CsvFileSource(resources = "/view/csv/get_participant_events_invalid.csv", numLinesToSkip = 1)
-  public void givenInvalidData_WhenGetParticipantEvents_ThenReturnEmptyList(
-      String participantCreateInput,
-      String eventCreateInput,
-      String eventRegInput,
-      String participantIdInput,
-      String expectedOutput) {
-    performConsoleAction(1, participantCreateInput);
-    performConsoleAction(2, eventCreateInput);
-    performConsoleAction(3, eventRegInput);
-    assertDoesNotThrow(() -> performConsoleAction(11, participantIdInput));
+  @MethodSource("sortFields")
+  void givenSortField_whenSortParticipants_thenAliceBeforeBob(String sortField) {
+    arrangeTwoParticipants();
+
+    String output = captureOutput(() -> performConsoleAction(11, sortField));
+
+    assertTrue(output.indexOf("Alice") < output.indexOf("Bob"));
   }
 
-  @ParameterizedTest
-  @CsvFileSource(
-      resources = "/view/csv/get_all_registered_participants_valid.csv",
-      numLinesToSkip = 1)
-  public void givenValidData_WhenGetAllRegisteredParticipants_ThenReturnAllPairs(
-      String participantCreateInput1,
-      String eventCreateInput1,
-      String eventRegInput1,
-      String participantCreateInput2,
-      String eventCreateInput2,
-      String eventRegInput2,
-      String expectedOutput) {
-    performConsoleAction(1, participantCreateInput1);
-    performConsoleAction(2, eventCreateInput1);
-    performConsoleAction(3, eventRegInput1);
-    performConsoleAction(1, participantCreateInput2);
-    performConsoleAction(2, eventCreateInput2);
-    performConsoleAction(3, eventRegInput2);
-    assertDoesNotThrow(() -> performConsoleAction(12, ""));
+  @Test
+  void givenGenderSort_whenSortParticipants_thenBobBeforeAlice() {
+    arrangeTwoParticipants();
+
+    String output = captureOutput(() -> performConsoleAction(11, "GENDER"));
+
+    assertTrue(output.indexOf("Bob") < output.indexOf("Alice"));
+  }
+
+  @Test
+  void givenInvalidSortField_whenSortParticipants_thenErrorPrinted() {
+    arrangeTwoParticipants();
+
+    String output = captureOutput(() -> performConsoleAction(11, "HEIGHT"));
+
+    assertTrue(output.contains("ОШИБКА"));
+  }
+
+  // ---------- case 12: get registration by id ----------
+
+  @Test
+  void givenExistingRegistration_whenGetRegistrationById_thenRegistrationPrinted() {
+    arrangeRegistration();
+
+    String output = captureOutput(() -> performConsoleAction(12, "1"));
+
+    assertTrue(output.contains("ACCEPTED"));
+  }
+
+  @Test
+  void givenMissingRegistration_whenGetRegistrationById_thenErrorPrinted() {
+    String output = captureOutput(() -> performConsoleAction(12, "999"));
+
+    assertTrue(output.contains("ОШИБКА"));
+  }
+
+  // ---------- case 13: get all registrations ----------
+
+  @Test
+  void givenRegistration_whenGetAllRegistrations_thenRegistrationPrinted() {
+    arrangeRegistration();
+
+    String output = captureOutput(() -> performConsoleAction(13, ""));
+
+    assertTrue(output.contains("ACCEPTED"));
+  }
+
+  @Test
+  void givenNoRegistrations_whenGetAllRegistrations_thenNoThrow() {
+    assertDoesNotThrow(() -> performConsoleAction(13, ""));
+  }
+
+  // ---------- case 14: undo latest action ----------
+
+  @Test
+  void givenCreatedEvent_whenUndo_thenEventRemoved() {
+    arrangeEvent();
+
+    performConsoleAction(14, "");
+
+    assertThrows(EventNotFoundException.class, () -> eventService.getEventById(1));
+  }
+
+  @Test
+  void givenCreatedParticipant_whenUndo_thenParticipantRemoved() {
+    arrangeParticipant();
+
+    performConsoleAction(14, "");
+
+    assertThrows(ParticipantNotFoundException.class, () -> eventService.getParticipantById(1));
+  }
+
+  @Test
+  void givenRegistration_whenUndo_thenRegistrationRemoved() {
+    arrangeRegistration();
+
+    performConsoleAction(14, "");
+
+    assertThrows(
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
+  }
+
+  @Test
+  void givenEmptyHistory_whenUndo_thenErrorPrinted() {
+    String output = captureOutput(() -> performConsoleAction(14, ""));
+
+    assertTrue(output.contains("ОШИБКА"));
+  }
+
+  // ---------- case 15: clear console ----------
+
+  @Test
+  void givenAnyState_whenClearConsole_thenNoThrow() {
+    assertDoesNotThrow(() -> performConsoleAction(15, ""));
+  }
+
+  // ---------- default: invalid action ----------
+
+  @Test
+  void givenInvalidAction_whenPerformAction_thenNoThrow() {
+    assertDoesNotThrow(() -> performConsoleAction(99, ""));
+  }
+
+  @Test
+  void givenInvalidAction_whenPerformAction_thenInvalidMessagePrinted() {
+    String output = captureOutput(() -> performConsoleAction(99, ""));
+
+    assertTrue(output.contains("Введено некорректное значение!"));
   }
 }

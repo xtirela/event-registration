@@ -1,4 +1,0 @@
-participantCreateInput,eventCreateInput,eventRegInput,participantIdInput,expectedOutput
-"John,Doe,john@test.com,25,MALE","Party,2027-05-01T13:30:00+02:00,3,18,20,NONE","1,1","999","0"
-"Jane,Doe,jane@test.com,30,FEMALE","Concert,2027-06-15T20:00:00+03:00,4,21,50,FEMALE_ONLY","1,1","-1","0"
-"Bob,Smith,bob@test.com,40,MALE","Football Match,2027-07-20T15:00:00+00:00,2,16,100,MALE_ONLY","1,1","0","0"

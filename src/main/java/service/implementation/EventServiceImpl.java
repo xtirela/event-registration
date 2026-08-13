@@ -1,49 +1,115 @@
 package service.implementation;
 
 import dto.*;
+import exception.EventCapacityExceededException;
+import exception.EventNotFoundException;
+import exception.EventRegException;
+import exception.IllegalArgumentEventRegException;
+import exception.ParticipantNotFoundException;
+import exception.RegistrationNotFoundException;
 import java.time.OffsetDateTime;
 import java.util.*;
-import java.util.List;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import model.*;
 import model.Event;
 import model.enums.*;
+import repository.EventRegistrationRepository;
+import repository.EventRepository;
+import repository.ParticipantRepository;
+import repository.implementation.EventRegistrationRepositoryImpl;
+import repository.implementation.EventRepositoryImpl;
+import repository.implementation.ParticipantRepositoryImpl;
 import service.EventService;
 
 // @Component
 // @Primary
 public class EventServiceImpl implements EventService {
-  // создать мероприятие
-  // зарегистрировать участника
-  // отменить регистрацию
-  // показать список
-  private int eventCounter = 1;
-  private int participantCounter = 1;
-  private int eventRegistrationCounter = 1;
 
-  private final HashMap<Integer, Event> events = new HashMap<Integer, Event>();
+  private final ParticipantRepository participantRepository = new ParticipantRepositoryImpl();
+  private final EventRepository eventRepository = new EventRepositoryImpl();
+  private final EventRegistrationRepository eventRegistrationRepository =
+      new EventRegistrationRepositoryImpl();
 
-  private final HashMap<Integer, Participant> participants = new HashMap<Integer, Participant>();
+  private final List<ActionData> actionHistory = new LinkedList<>();
 
-  private final HashMap<Integer, EventRegistration> registrationRequests =
-      new HashMap<Integer, EventRegistration>();
+  @Override
+  public UndoResponse undoLatestAction() {
+    if (actionHistory.isEmpty()) {
+      throw new EventRegException("no action to undo", "undoLatestAction");
+    }
 
-  private final HashMap<EventRegistration, Event> registeredParticipants =
-      new HashMap<EventRegistration, Event>();
+    ActionData actionData = actionHistory.removeLast();
+
+    switch (actionData.getActionType()) {
+      case ActionType.CREATE_EVENT:
+        deleteEvent(actionData.getEventId());
+        return UndoResponse.builder()
+            .description("successfully undone event creation" + actionData.getEventId())
+            .type(actionData.getActionType())
+            .build();
+
+      case ActionType.CREATE_PARTICIPANT:
+        deleteParticipant(actionData.getParticipantId());
+        return UndoResponse.builder()
+            .description("successfully undone participant creation" + actionData.getParticipantId())
+            .type(actionData.getActionType())
+            .build();
+
+      case ActionType.REGISTER_PARTICIPANT:
+        deleteParticipantRegistration(actionData.getRegisteredRegistrationId());
+        return UndoResponse.builder()
+            .description(
+                "successfully undone participant registration"
+                    + actionData.getRegisteredRegistrationId())
+            .type(actionData.getActionType())
+            .build();
+
+      case ActionType.CANCEL_REGISTRATION:
+        if (actionData.getRegisteredRegistrationId() != null) {
+          EventRegistration eventRegistration =
+              eventRegistrationRepository.findById(actionData.getRegisteredRegistrationId());
+          if (eventRegistration == null) {
+            throw new RegistrationNotFoundException(
+                actionData.getRegisteredRegistrationId(), "undoLatestAction");
+          }
+          changeRegistrationRequestStatus(
+              actionData.getRegisteredRegistrationId(),
+              actionData.getRegisteredEventRegRequestStatus(),
+              "cancelled reg request after undo",
+              false);
+        }
+
+        changeRegistrationRequestStatus(
+            actionData.getCancelledRegistrationId(),
+            actionData.getCancelledEventRegRequestStatus(),
+            "uncancelled request",
+            false);
+
+        return UndoResponse.builder()
+            .description(
+                "successfully undone registration cancellation"
+                    + actionData.getCancelledRegistrationId())
+            .type(actionData.getActionType())
+            .build();
+
+      default:
+        throw new EventRegException("Invalid action type", "undoLatestAction");
+    }
+  }
 
   @Override
   public EventResponse createEvent(EventCreateRequest eventCreateRequest) {
 
-    EventResponse errorMessage = checkValidCreateEvent(eventCreateRequest);
-
-    if (errorMessage != null) {
-      return errorMessage;
-    }
+    checkValidCreateEvent(eventCreateRequest);
 
     Event event =
         Event.builder()
-            .id(eventCounter++)
+            .id(eventRepository.nextId())
             .createdAt(OffsetDateTime.now())
             .eventName(eventCreateRequest.getEventName())
+            .location(eventCreateRequest.getLocation())
             .eventDate(eventCreateRequest.getEventDate())
             .eventDuration(eventCreateRequest.getEventDuration())
             .eventStatus(EventStatus.PLANNED)
@@ -53,39 +119,54 @@ public class EventServiceImpl implements EventService {
             .currentParticipantAmount(0)
             .eventGenderRequirement(eventCreateRequest.getGenderRequirement())
             .build();
-    events.put(event.getId(), event);
+
+    eventRepository.save(event);
+
+    addActionToHistory(ActionType.CREATE_EVENT, null, event.getId(), null, null, null, null);
 
     return eventToEventResponse(event);
+  }
+
+  private void deleteEvent(Integer eventId) {
+
+    eventRepository.delete(eventId);
   }
 
   @Override
   public ParticipantResponse createParticipant(ParticipantCreateRequest participantCreateRequest) {
 
-    ParticipantResponse errorMessage = checkValidCreateRequest(participantCreateRequest);
-
-    if (errorMessage != null) {
-      return errorMessage;
-    }
+    checkValidCreateRequest(participantCreateRequest);
 
     Participant participant =
         Participant.builder()
-            .id(participantCounter++)
+            .id(participantRepository.nextId())
             .firstName(participantCreateRequest.getFirstName())
             .lastName(participantCreateRequest.getLastName())
             .email(participantCreateRequest.getEmail())
             .age(participantCreateRequest.getAge())
             .participantGender(participantCreateRequest.getParticipantGender())
-            .createdAt(OffsetDateTime.now())
+            .registeredAt(OffsetDateTime.now())
             .build();
-    participants.put(participant.getId(), participant);
+
+    participantRepository.save(participant);
+
+    addActionToHistory(
+        ActionType.CREATE_PARTICIPANT, participant.getId(), null, null, null, null, null);
 
     return ParticipantResponse.builder()
+        .participantId(participant.getId())
         .firstName(participant.getFirstName())
         .lastName(participant.getLastName())
         .email(participant.getEmail())
         .age(participant.getAge())
         .participantGender(participant.getParticipantGender())
+        .registeredAt(participant.getRegisteredAt())
         .build();
+  }
+
+  private void deleteParticipant(Integer participantId) {
+
+    participantRepository.delete(participantId);
   }
 
   @Override
@@ -93,156 +174,152 @@ public class EventServiceImpl implements EventService {
 
     EventRegistration eventRegistration =
         EventRegistration.builder()
-            .id(eventRegistrationCounter++)
+            .id(eventRegistrationRepository.nextId())
             .participantId(eventRegRequest.getParticipantId())
             .eventId(eventRegRequest.getEventId())
             .eventRegRequestStatus(EventRegRequestStatus.PENDING)
             .build();
 
-    Participant participant = participants.get(eventRegRequest.getParticipantId());
+    Participant participant = participantRepository.findById(eventRegRequest.getParticipantId());
+
     if (participant == null) {
 
       eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-      registrationRequests.put(eventRegistration.getId(), eventRegistration);
-      return EventRegResponse.builder()
-          .description("Participant does not exist!")
-          .eventRegRequestStatus(eventRegistration.getEventRegRequestStatus())
-          .build();
+      eventRegistrationRepository.save(eventRegistration);
+
+      throw new ParticipantNotFoundException(
+          eventRegRequest.getParticipantId(), "registerParticipant");
     }
 
-    Event event = events.get(eventRegRequest.getEventId());
+    Event event = eventRepository.findById(eventRegRequest.getEventId());
     if (event == null) {
 
       eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-      registrationRequests.put(eventRegistration.getId(), eventRegistration);
-      return EventRegResponse.builder()
-          .description("Event does not exist!")
-          .eventRegRequestStatus(eventRegistration.getEventRegRequestStatus())
-          .build();
+      eventRegistrationRepository.save(eventRegistration);
+
+      throw new EventNotFoundException(
+          eventRegistration.getEventId(), eventRegistration.getId(), "registerParticipant");
     }
 
     eventRegistration.setDescription("Request undergoing review...");
     eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.PENDING);
 
-    registrationRequests.put(eventRegistration.getId(), eventRegistration);
+    eventRegistrationRepository.save(eventRegistration);
 
+    //    CompletableFuture.runAsync(() -> reviewParticipant(participant, event,
+    // eventRegistration));
     reviewParticipant(participant, event, eventRegistration);
 
-    return EventRegistrationToEventRegResponse(
-        eventRegistration,
-        eventRegistration.getDescription(),
-        eventRegistration.getEventRegRequestStatus());
+    addActionToHistory(
+        ActionType.REGISTER_PARTICIPANT,
+        participant.getId(),
+        event.getId(),
+        eventRegistration.getId(),
+        null,
+        null,
+        null);
+
+    return eventRegistrationToEventRegResponse(eventRegistration);
   }
 
-  @Override
-  public EventRegResponse cancelRegistration(CancelRegRequest cancelRegRequest) {
+  private void deleteParticipantRegistration(Integer participantRegistrationId) {
 
     EventRegistration eventRegistration =
-        registrationRequests.get(cancelRegRequest.getEventRegistrationId());
+        eventRegistrationRepository.findById(participantRegistrationId);
 
-    if (eventRegistration == null) {
-      return EventRegResponse.builder()
-          .description("Event registration does not exist!")
-          .eventRegRequestStatus(EventRegRequestStatus.NOT_FOUND)
-          .build();
+    if (eventRegistration != null) {
+      Event event = eventRepository.findById(eventRegistration.getEventId());
+      if (event == null) {
+        throw new EventNotFoundException(
+            eventRegistration.getEventId(),
+            eventRegistration.getId(),
+            "deleteParticipantRegistration");
+      }
+      if (eventRegistration.getEventRegRequestStatus().equals(EventRegRequestStatus.ACCEPTED)) {
+        event.setCurrentParticipantAmount(event.getCurrentParticipantAmount() - 1);
+        eventRepository.save(event);
+      }
+      if (eventRegistration.getEventRegRequestStatus().equals(EventRegRequestStatus.WAITING)) {
+        eventRegistrationRepository.removeFromWaitingQueue(eventRegistration.getId());
+      }
+
+      eventRegistrationRepository.delete(participantRegistrationId);
     }
-
-    Event event = events.get(eventRegistration.getEventId());
-
-    if (event == null) {
-      return EventRegResponse.builder()
-          .description("Event to which registration points to does not exist!")
-          .eventRegRequestStatus(EventRegRequestStatus.NOT_FOUND)
-          .build();
-    }
-
-    if (eventRegistration.getEventRegRequestStatus() == EventRegRequestStatus.ACCEPTED) {
-      event.setCurrentParticipantAmount(event.getCurrentParticipantAmount() - 1);
-    }
-
-    eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.CANCELLED);
-    eventRegistration.setDescription("Cancelled by participant");
-
-    registrationRequests.put(cancelRegRequest.getEventRegistrationId(), eventRegistration);
-
-    return EventRegistrationToEventRegResponse(
-        eventRegistration,
-        eventRegistration.getDescription(),
-        eventRegistration.getEventRegRequestStatus());
   }
 
   @Override
   public List<ParticipantResponse> getParticipants() {
-    Set<Map.Entry<Integer, Participant>> participantSet = participants.entrySet();
-    List<ParticipantResponse> participantResponse = new ArrayList<>();
 
-    for (Map.Entry<Integer, Participant> entry : participantSet) {
-      Participant participant = entry.getValue();
-
-      ParticipantResponse itemResponse =
-          ParticipantResponse.builder()
-              .firstName(participant.getFirstName())
-              .lastName(participant.getLastName())
-              .email(participant.getEmail())
-              .age(participant.getAge())
-              .participantGender(participant.getParticipantGender())
-              .build();
-
-      participantResponse.add(itemResponse);
-    }
-
-    return participantResponse;
+    return participantRepository.findAll().stream()
+        .map(
+            participant ->
+                ParticipantResponse.builder()
+                    .participantId(participant.getId())
+                    .firstName(participant.getFirstName())
+                    .lastName(participant.getLastName())
+                    .email(participant.getEmail())
+                    .age(participant.getAge())
+                    .participantGender(participant.getParticipantGender())
+                    .registeredAt(participant.getRegisteredAt())
+                    .build())
+        .toList();
   }
 
   @Override
   public ParticipantResponse getParticipantById(int participantId) {
-    Participant participant = participants.get(participantId);
+    Participant participant = participantRepository.findById(participantId);
     if (participant != null) {
       return ParticipantResponse.builder()
+          .participantId(participant.getId())
           .firstName(participant.getFirstName())
           .lastName(participant.getLastName())
           .email(participant.getEmail())
           .age(participant.getAge())
           .participantGender(participant.getParticipantGender())
+          .registeredAt(participant.getRegisteredAt())
           .build();
     } else {
-      return ParticipantResponse.builder().firstName("NOT FOUND").build();
+      throw new ParticipantNotFoundException(participantId, "getParticipantById");
     }
+  }
+
+  @Override
+  public List<ParticipantResponse> getParticipantsSorted(Comparator<Participant> comparator) {
+    return participantRepository.findAll().stream()
+        .sorted(comparator)
+        .map(this::participantToParticipantResponse)
+        .collect(Collectors.toList());
   }
 
   @Override
   public List<EventResponse> getEvents() {
-    Set<Map.Entry<Integer, Event>> eventsSet = events.entrySet();
-    List<EventResponse> eventsResponse = new ArrayList<>();
+    return eventRepository.findAll().stream().map(this::eventToEventResponse).toList();
+  }
 
-    for (Map.Entry<Integer, Event> entry : eventsSet) {
-      Event event = entry.getValue();
+  @Override
+  public List<EventResponse> getEventsFiltered(List<Predicate<Event>> predicates) {
+    return eventRepository.findAll().stream()
+        .filter(predicates.stream().reduce(Predicate::and).orElse(event -> true))
+        .map(this::eventToEventResponse)
+        .toList();
+  }
 
-      EventResponse eventResponse =
-          EventResponse.builder()
-              .eventName(event.getEventName())
-              .eventDate(event.getEventDate())
-              .eventDuration(event.getEventDuration())
-              .ageRequired(event.getAgeRequired())
-              .currentParticipantAmount(event.getCurrentParticipantAmount())
-              .maxParticipantAmount(event.getMaxParticipantAmount())
-              .eventGenderRequirement(event.getEventGenderRequirement())
-              .eventStatus(event.getEventStatus())
-              .eventRegistrationStatus(event.getEventRegistrationStatus())
-              .build();
-
-      eventsResponse.add(eventResponse);
-    }
-
-    return eventsResponse;
+  @Override
+  public Map<String, List<EventResponse>> getEventsGrouped(Function<Event, String> classifier) {
+    return eventRepository.findAll().stream()
+        .collect(
+            Collectors.groupingBy(
+                classifier, Collectors.mapping(this::eventToEventResponse, Collectors.toList())));
   }
 
   @Override
   public EventResponse getEventById(int eventId) {
-    Event event = events.get(eventId);
+    Event event = eventRepository.findById(eventId);
     if (event != null) {
       return EventResponse.builder()
+          .eventId(event.getId())
           .eventName(event.getEventName())
+          .location(event.getLocation())
           .eventDate(event.getEventDate())
           .eventDuration(event.getEventDuration())
           .ageRequired(event.getAgeRequired())
@@ -253,282 +330,347 @@ public class EventServiceImpl implements EventService {
           .eventRegistrationStatus(event.getEventRegistrationStatus())
           .build();
     } else {
-      return EventResponse.builder().eventName("NOT FOUND").build();
+      throw new EventNotFoundException(eventId, "getEventById");
     }
   }
 
   @Override
   public List<EventRegResponse> getRegistrationRequests() {
-    List<EventRegResponse> registrationResponses = new ArrayList<>();
-
-    if (registrationRequests.isEmpty()) {
-      return registrationResponses; // Возвращаем пустой список
-    }
-
-    for (Map.Entry<Integer, EventRegistration> entry : registrationRequests.entrySet()) {
-      if (entry == null) {
-        continue;
-      }
-      EventRegistration registration = entry.getValue();
-
-      if (registration == null) {
-        continue;
-      }
-
-      EventRegResponse response =
-          EventRegistrationToEventRegResponse(
-              registration, registration.getDescription(), registration.getEventRegRequestStatus());
-
-      if (response != null) {
-        registrationResponses.add(response);
-      }
-    }
-
-    return registrationResponses;
+    return eventRegistrationRepository.findAll().stream()
+        .map(this::eventRegistrationToEventRegResponse)
+        .toList();
   }
 
   @Override
   public EventRegResponse getRegistrationRequestById(int eventRegistrationId) {
-    EventRegistration registration = registrationRequests.get(eventRegistrationId);
+    EventRegistration registration = eventRegistrationRepository.findById(eventRegistrationId);
     if (registration != null) {
-      return EventRegistrationToEventRegResponse(
-          registration, registration.getDescription(), registration.getEventRegRequestStatus());
+      return eventRegistrationToEventRegResponse(registration);
     } else {
-      return EventRegResponse.builder()
-          .eventRegRequestStatus(EventRegRequestStatus.NOT_FOUND)
-          .description("Registration request not found!")
-          .build();
+      throw new RegistrationNotFoundException(eventRegistrationId, "getRegistrationRequestById");
     }
   }
 
   @Override
-  public List<ParticipantEventPair> getRegisteredParticipant(Integer participantId) {
-    Set<Map.Entry<EventRegistration, Event>> registeredParticipantsSet =
-        registeredParticipants.entrySet();
+  public List<EventRegResponse> getRegistrationRequestsInWaitingQueue(Integer eventId) {
+    return eventRegistrationRepository.findAllInWaitingQueue().stream()
+        .map(this::eventRegistrationToEventRegResponse)
+        .toList();
+  }
 
-    List<ParticipantEventPair> RegParticipantsResponse = new ArrayList<>();
+  private void pollWaitingQueue(int eventId) {
+    EventRegistration eventRegistration = eventRegistrationRepository.pollWaitingQueue(eventId);
+    if (eventRegistration != null) {
 
-    for (Map.Entry<EventRegistration, Event> entry : registeredParticipantsSet) {
-      Event event = entry.getValue();
-      EventRegistration registration = entry.getKey();
-
-      EventResponse eventResponse = eventToEventResponse(event);
-      EventRegResponse eventRegResponse =
-          EventRegistrationToEventRegResponse(
-              registration, registration.getDescription(), registration.getEventRegRequestStatus());
-      if (participantId == null) {
-        RegParticipantsResponse.add(
-            ParticipantEventPair.builder()
-                .eventRegResponse(eventRegResponse)
-                .eventResponse(eventResponse)
-                .build());
-      } else if (participantId.equals(registration.getParticipantId())) {
-        RegParticipantsResponse.add(
-            ParticipantEventPair.builder()
-                .eventRegResponse(eventRegResponse)
-                .eventResponse(eventResponse)
-                .build());
+      Event event = eventRepository.findById(eventRegistration.getEventId());
+      if (event == null) {
+        throw new EventNotFoundException(
+            eventRegistration.getEventId(), eventRegistration.getId(), "pollWaitingQueue");
       }
+      changeRegistrationRequestStatus(
+          eventRegistration.getId(),
+          EventRegRequestStatus.ACCEPTED,
+          "automatic accept after waiting for queue turn",
+          false);
     }
-
-    return RegParticipantsResponse;
+    //        else
+    //        {
+    //            throw new RuntimeException("waiting queue is empty for event " + eventId);
+    //        }
   }
 
+  // TODO: снести и переделать на логику чище когда будет переход на spring
   @Override
-  public List<ParticipantEventPair> getAllRegisteredParticipants() {
+  public EventRegResponse changeRegistrationRequestStatus(
+      int registrationId,
+      EventRegRequestStatus eventRegRequestStatus,
+      String description,
+      Boolean addToHistory) {
+    EventRegistration eventRegistration = eventRegistrationRepository.findById(registrationId);
+    if (eventRegistration != null) {
+      if (eventRegRequestStatus == eventRegistration.getEventRegRequestStatus()) {
+        throw new EventRegException(
+            "EventRegistration already has the exact same status" + eventRegistration.getId(),
+            "changeRegistrationRequestStatus");
+      }
 
-    Set<Map.Entry<EventRegistration, Event>> registeredParticipantsSet =
-        registeredParticipants.entrySet();
+      Event event = eventRepository.findById(eventRegistration.getEventId());
+      if (event == null) {
+        throw new EventNotFoundException(
+            eventRegistration.getEventId(),
+            eventRegistration.getId(),
+            "changeRegistrationRequestStatus");
+      }
 
-    List<ParticipantEventPair> RegParticipantsResponse = new ArrayList<>();
+      Integer registeredRegistrationId = null;
+      EventRegRequestStatus registeredEventRegRequestStatus = null;
 
-    for (Map.Entry<EventRegistration, Event> entry : registeredParticipantsSet) {
-      Event event = entry.getValue();
-      EventRegistration registration = entry.getKey();
+      if (eventRegistration.getEventRegRequestStatus().equals(EventRegRequestStatus.ACCEPTED)) {
+        event.setCurrentParticipantAmount(event.getCurrentParticipantAmount() - 1);
+        List<EventRegResponse> waiting = getRegistrationRequestsInWaitingQueue(event.getId());
+        if (!waiting.isEmpty()) {
+          registeredRegistrationId = waiting.getFirst().getRegistrationId();
+          registeredEventRegRequestStatus = waiting.getFirst().getEventRegRequestStatus();
+        }
 
-      EventResponse eventResponse = eventToEventResponse(event);
-      EventRegResponse eventRegResponse =
-          EventRegistrationToEventRegResponse(
-              registration, registration.getDescription(), registration.getEventRegRequestStatus());
-      RegParticipantsResponse.add(
-          ParticipantEventPair.builder()
-              .eventRegResponse(eventRegResponse)
-              .eventResponse(eventResponse)
-              .build());
+        pollWaitingQueue(eventRegistration.getEventId());
+      }
+
+      switch (eventRegRequestStatus) {
+        case EventRegRequestStatus.WAITING:
+          addToWaitingQueue(eventRegistration);
+          break;
+        case EventRegRequestStatus.ACCEPTED:
+          if (event.getCurrentParticipantAmount() + 1 > event.getMaxParticipantAmount()) {
+            throw new EventCapacityExceededException(
+                event.getId(), "changeRegistrationRequestStatus");
+          }
+          event.setCurrentParticipantAmount(event.getCurrentParticipantAmount() + 1);
+          break;
+        case EventRegRequestStatus.DENIED:
+          break;
+        case EventRegRequestStatus.CANCELLED:
+          if (addToHistory) {
+            addActionToHistory(
+                ActionType.CANCEL_REGISTRATION,
+                null,
+                event.getId(),
+                registeredRegistrationId,
+                eventRegistration.getId(),
+                registeredEventRegRequestStatus,
+                eventRegistration.getEventRegRequestStatus());
+          }
+          eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.CANCELLED);
+      }
+
+      eventRegistration.setEventRegRequestStatus(eventRegRequestStatus);
+      eventRegistration.setDescription(description);
+      eventRegistrationRepository.save(eventRegistration);
+
+      eventRepository.save(event);
+
+      return eventRegistrationToEventRegResponse(eventRegistration);
+    } else {
+      throw new RegistrationNotFoundException(registrationId, "changeRegistrationRequestStatus");
+    }
+  }
+
+  private void addToWaitingQueue(EventRegistration eventRegistration) {
+    Event event = eventRepository.findById(eventRegistration.getEventId());
+    if (event == null) {
+      throw new EventNotFoundException(
+          eventRegistration.getEventId(), eventRegistration.getId(), "addToWaitingQueue");
     }
 
-    return RegParticipantsResponse;
+    eventRepository.save(event);
+    eventRegistrationRepository.addToWaitingQueue(
+        eventRegistration.getEventId(), eventRegistration);
   }
 
   private void reviewParticipant(
       Participant participant, Event event, EventRegistration eventRegistration) {
     if (!(event.getEventRegistrationStatus() == EventRegistrationStatus.RESERVATIONS_OPEN)) {
-      eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-      eventRegistration.setDescription("Reservations are not open!");
-      registrationRequests.put(eventRegistration.getId(), eventRegistration);
+      changeRegistrationRequestStatus(
+          eventRegistration.getId(),
+          model.enums.EventRegRequestStatus.DENIED,
+          "Reservations are not open!",
+          false);
       return;
     }
 
     if (participant.getAge() < event.getAgeRequired()) {
-      eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-      eventRegistration.setDescription("Participant is out of age!");
-      registrationRequests.put(eventRegistration.getId(), eventRegistration);
+      changeRegistrationRequestStatus(
+          eventRegistration.getId(),
+          model.enums.EventRegRequestStatus.DENIED,
+          "Participant is out of age!",
+          false);
       return;
     }
 
     if (event.getCurrentParticipantAmount() >= event.getMaxParticipantAmount()) {
-      eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
       event.setEventRegistrationStatus(EventRegistrationStatus.ALL_RESERVED);
-      events.put(event.getId(), event);
-      eventRegistration.setDescription("All spots reserved");
-      registrationRequests.put(eventRegistration.getId(), eventRegistration);
+      eventRepository.save(event);
+      changeRegistrationRequestStatus(
+          eventRegistration.getId(),
+          model.enums.EventRegRequestStatus.DENIED,
+          "All spots reserved",
+          false);
       return;
     }
 
     if (event.getEventGenderRequirement() != EventGenderRequirement.NONE) {
       if (participant.getParticipantGender() == ParticipantGender.MALE
           && (event.getEventGenderRequirement() == EventGenderRequirement.FEMALE_ONLY)) {
-        eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-        eventRegistration.setDescription("Event is female only");
-        registrationRequests.put(eventRegistration.getId(), eventRegistration);
+        changeRegistrationRequestStatus(
+            eventRegistration.getId(), EventRegRequestStatus.DENIED, "Event is female only", false);
         return;
       }
       if (participant.getParticipantGender() == ParticipantGender.FEMALE
           && (event.getEventGenderRequirement() == EventGenderRequirement.MALE_ONLY)) {
-        eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-        eventRegistration.setDescription("Event is male only");
-        registrationRequests.put(eventRegistration.getId(), eventRegistration);
+        changeRegistrationRequestStatus(
+            eventRegistration.getId(), EventRegRequestStatus.DENIED, "Event is male only", false);
         return;
       }
       if (participant.getParticipantGender() == ParticipantGender.NOT_SPECIFIED) {
-        eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-        eventRegistration.setDescription("Event requires gender specified");
-        registrationRequests.put(eventRegistration.getId(), eventRegistration);
+        changeRegistrationRequestStatus(
+            eventRegistration.getId(),
+            EventRegRequestStatus.DENIED,
+            "Event requires gender specified",
+            false);
         return;
       }
     }
 
-    eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.ACCEPTED);
-    eventRegistration.setDescription("Reservation accepted");
-
-    registrationRequests.put(eventRegistration.getId(), eventRegistration);
-
-    registeredParticipants.put(eventRegistration, event);
-
-    event.setCurrentParticipantAmount(event.getCurrentParticipantAmount() + 1);
-    events.put(event.getId(), event);
+    changeRegistrationRequestStatus(
+        eventRegistration.getId(), EventRegRequestStatus.ACCEPTED, "Reservation accepted", false);
   }
 
-  private EventRegResponse EventRegistrationToEventRegResponse(
-      EventRegistration eventRegistration,
-      String description,
-      EventRegRequestStatus eventRegRequestStatus) {
-
-    Participant participant = participants.get(eventRegistration.getParticipantId());
-    if (participant == null) {
-      return EventRegResponse.builder().description("Participant does not exist!").build();
+  private void checkValidCreateRequest(ParticipantCreateRequest request) {
+    if (request == null) {
+      throw new IllegalArgumentEventRegException(
+          "request cannot be null", "checkValidCreateRequest");
     }
 
-    Event event = events.get(eventRegistration.getEventId());
+    if (request.getFirstName() == null || request.getFirstName().isBlank()) {
+      throw new IllegalArgumentEventRegException(
+          "first name is required", "checkValidCreateRequest");
+    }
+
+    if (request.getLastName() == null || request.getLastName().isBlank()) {
+      throw new IllegalArgumentEventRegException(
+          "last name is required", "checkValidCreateRequest");
+    }
+
+    if (request.getEmail() == null || request.getEmail().isBlank()) {
+      throw new IllegalArgumentEventRegException("email is required", "checkValidCreateRequest");
+    }
+
+    if (!request.getEmail().matches(".+@.+\\..+")) {
+      throw new IllegalArgumentEventRegException("invalid email format", "checkValidCreateRequest");
+    }
+
+    if (request.getAge() <= 0 || request.getAge() > 150) {
+      throw new IllegalArgumentEventRegException(
+          "Invalid age: " + request.getAge(), "checkValidCreateRequest");
+    }
+
+    if (request.getParticipantGender() == null) {
+      throw new IllegalArgumentEventRegException("gender is required", "checkValidCreateRequest");
+    }
+  }
+
+  private void checkValidCreateEvent(EventCreateRequest request) {
+    if (request == null) {
+      throw new IllegalArgumentEventRegException(
+          "EventCreateRequest cannot be null", "checkValidCreateEvent");
+    }
+    if (request.getEventName() == null || request.getEventName().isBlank()) {
+      throw new IllegalArgumentEventRegException(
+          "Event name cannot be empty", "checkValidCreateEvent");
+    }
+    if (request.getLocation() == null || request.getLocation().isBlank()) {
+      throw new IllegalArgumentEventRegException(
+          "Event location is required", "checkValidCreateEvent");
+    }
+    if (request.getEventDate() == null) {
+      throw new IllegalArgumentEventRegException("Event date is required", "checkValidCreateEvent");
+    }
+    if (request.getEventDate().isBefore(OffsetDateTime.now())) {
+      throw new IllegalArgumentEventRegException(
+          "Event date cannot be in the past: " + request.getEventDate(), "checkValidCreateEvent");
+    }
+    if (request.getEventDuration() == null
+        || request.getEventDuration().isNegative()
+        || request.getEventDuration().isZero()) {
+      throw new IllegalArgumentEventRegException(
+          "Duration must be positive", "checkValidCreateEvent");
+    }
+    if (request.getAgeRequired() < 0 || request.getAgeRequired() > 150) {
+      throw new IllegalArgumentEventRegException(
+          "Age must be 0-150, got: " + request.getAgeRequired(), "checkValidCreateEvent");
+    }
+    if (request.getGenderRequirement() == null) {
+      throw new IllegalArgumentEventRegException(
+          "Gender requirement must be MALE_ONLY, FEMALE_ONLY, or NONE", "checkValidCreateEvent");
+    }
+    if (request.getMaxParticipantAmount() <= 0) {
+      throw new IllegalArgumentEventRegException(
+          "Max participants must be > 0, got: " + request.getMaxParticipantAmount(),
+          "checkValidCreateEvent");
+    }
+  }
+
+  private EventRegResponse eventRegistrationToEventRegResponse(
+      EventRegistration eventRegistration) {
+
+    Participant participant = participantRepository.findById(eventRegistration.getParticipantId());
+    if (participant == null) {
+      throw new ParticipantNotFoundException(
+          eventRegistration.getParticipantId(), "eventRegistrationToEventRegResponse");
+    }
+
+    Event event = eventRepository.findById(eventRegistration.getEventId());
     if (event == null) {
-      return EventRegResponse.builder().description("Event does not exist!").build();
+      throw new EventNotFoundException(
+          eventRegistration.getEventId(), "eventRegistrationToEventRegResponse");
     }
 
     return EventRegResponse.builder()
-        .firstName(participant.getFirstName())
-        .lastName(participant.getLastName())
-        .email(participant.getEmail())
-        .age(participant.getAge())
-        .participantGender(participant.getParticipantGender())
-        .eventRegRequestStatus(eventRegRequestStatus)
-        .description(description)
-        .eventName(event.getEventName())
+        .registrationId(eventRegistration.getId())
+        .participantId(eventRegistration.getParticipantId())
+        .eventId(eventRegistration.getEventId())
+        .eventResponse(eventToEventResponse(event))
+        .participantResponse(participantToParticipantResponse(participant))
+        .eventRegRequestStatus(eventRegistration.getEventRegRequestStatus())
+        .description(eventRegistration.getDescription())
         .build();
   }
 
   private EventResponse eventToEventResponse(Event event) {
     return EventResponse.builder()
+        .eventId(event.getId())
         .eventName(event.getEventName())
+        .location(event.getLocation())
         .eventDate(event.getEventDate())
         .eventDuration(event.getEventDuration())
         .ageRequired(event.getAgeRequired())
+        .currentParticipantAmount(event.getCurrentParticipantAmount())
         .maxParticipantAmount(event.getMaxParticipantAmount())
+        .eventGenderRequirement(event.getEventGenderRequirement())
         .eventStatus(event.getEventStatus())
         .eventRegistrationStatus(event.getEventRegistrationStatus())
-        .eventGenderRequirement(event.getEventGenderRequirement())
         .build();
   }
 
-  private ParticipantResponse checkValidCreateRequest(ParticipantCreateRequest request) {
-    if (request == null) {
-      return ParticipantResponse.builder().firstName("Error: request cannot be null").build();
-    }
-
-    if (request.getFirstName() == null || request.getFirstName().isBlank()) {
-      return ParticipantResponse.builder().firstName("Error: first name is required").build();
-    }
-
-    if (request.getLastName() == null || request.getLastName().isBlank()) {
-      return ParticipantResponse.builder().firstName("Error: last name is required").build();
-    }
-
-    if (request.getEmail() == null || request.getEmail().isBlank()) {
-      return ParticipantResponse.builder().firstName("Error: email is required").build();
-    }
-
-    if (!request.getEmail().matches(".+@.+\\..+")) {
-      return ParticipantResponse.builder().firstName("Error: invalid email format").build();
-    }
-
-    if (request.getAge() <= 0 || request.getAge() > 150) {
-      return ParticipantResponse.builder().firstName("Invalid age: " + request.getAge()).build();
-    }
-
-    if (request.getParticipantGender() == null) {
-      return ParticipantResponse.builder().firstName("Error: gender is required").build();
-    }
-    return null;
+  private ParticipantResponse participantToParticipantResponse(Participant participant) {
+    return ParticipantResponse.builder()
+        .participantId(participant.getId())
+        .firstName(participant.getFirstName())
+        .lastName(participant.getLastName())
+        .email(participant.getEmail())
+        .age(participant.getAge())
+        .participantGender(participant.getParticipantGender())
+        .registeredAt(participant.getRegisteredAt())
+        .build();
   }
 
-  private EventResponse checkValidCreateEvent(EventCreateRequest request) {
-    if (request == null) {
-      return EventResponse.builder().eventName("Error: request cannot be null").build();
-    }
-
-    if (request.getEventName() == null || request.getEventName().isBlank()) {
-      return EventResponse.builder().eventName("Error: event name cannot be empty").build();
-    }
-
-    if (request.getEventDate() == null) {
-      return EventResponse.builder().eventName("Error: event date is required").build();
-    }
-
-    if (request.getEventDate().isBefore(OffsetDateTime.now())) {
-      return EventResponse.builder().eventName("Error: event date cannot be in the past").build();
-    }
-
-    if (request.getEventDuration() == null
-        || request.getEventDuration().isNegative()
-        || request.getEventDuration().isZero()) {
-      return EventResponse.builder().eventName("Error: duration must be positive").build();
-    }
-
-    if (request.getAgeRequired() < 0 || request.getAgeRequired() > 150) {
-      return EventResponse.builder().eventName("Invalid age: " + request.getAgeRequired()).build();
-    }
-
-    if (request.getGenderRequirement() == null) {
-      return EventResponse.builder()
-          .eventName("Error: gender requirement must be specified (MALE_ONLY/FEMALE_ONLY/ANY)")
-          .build();
-    }
-
-    if (request.getMaxParticipantAmount() <= 0) {
-      return EventResponse.builder()
-          .eventName("Error: maximum participant amount must be > 0")
-          .build();
-    }
-
-    return null;
+  private void addActionToHistory(
+      ActionType actionType,
+      Integer participantId,
+      Integer eventId,
+      Integer registeredRegistrationId,
+      Integer cancelledRegistrationId,
+      EventRegRequestStatus registeredEventRegRequestStatus,
+      EventRegRequestStatus cancelledEventRegRequestStatus) {
+    actionHistory.addLast(
+        ActionData.builder()
+            .actionType(actionType)
+            .participantId(participantId)
+            .eventId(eventId)
+            .registeredRegistrationId(registeredRegistrationId)
+            .cancelledRegistrationId(cancelledRegistrationId)
+            .registeredEventRegRequestStatus(registeredEventRegRequestStatus)
+            .cancelledEventRegRequestStatus(cancelledEventRegRequestStatus)
+            .build());
   }
 }
