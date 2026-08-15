@@ -15,6 +15,8 @@ public class EventCreateRequest {
 
   private Duration eventDuration;
 
+  private String location;
+
   private int ageRequired;
   private EventGenderRequirement genderRequirement;
 

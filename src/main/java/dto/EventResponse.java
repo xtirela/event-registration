@@ -11,9 +11,13 @@ import model.enums.EventStatus;
 @Data
 @Builder
 public class EventResponse {
+  private int eventId;
+
   private String eventName;
 
   private OffsetDateTime eventDate;
+
+  private String location;
 
   private Duration eventDuration;
 

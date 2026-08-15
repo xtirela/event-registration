@@ -16,6 +16,8 @@ public class Event {
 
   private OffsetDateTime eventDate;
 
+  private String location;
+
   private Duration eventDuration;
 
   private int ageRequired;
