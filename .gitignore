@@ -4,7 +4,7 @@ build/
 !**/src/main/**/build/
 !**/src/test/**/build/
 .kotlin
-gradle.properties
+data/
 
 ### IntelliJ IDEA ###
 .idea/modules.xml
@@ -42,3 +42,6 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Persistence ###
+data/

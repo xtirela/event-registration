@@ -1,21 +1,31 @@
 package view;
 
+import config.RepositoryConfig;
+import java.util.InputMismatchException;
 import java.util.Scanner;
 import service.EventService;
 import service.implementation.EventServiceImpl;
 
 public class Main {
   public static void main(String[] args) {
-    EventService eventService = new EventServiceImpl();
+
+    EventService eventService = new EventServiceImpl(RepositoryConfig.load());
     ConsoleView consoleView = new ConsoleView(eventService);
 
     Scanner scanner = new Scanner(System.in);
 
+    int input;
     while (true) {
       consoleView.printMenu();
-      int input = scanner.nextInt();
+      try {
+        input = scanner.nextInt();
+      } catch (InputMismatchException e) {
+        scanner.nextLine();
+        System.out.println("Неверный ввод, введите номер пункта меню");
+        continue;
+      }
       scanner.nextLine();
-      if (input == 14) break;
+      if (input == 16) break;
 
       consoleView.performAction(input, scanner);
     }
