@@ -14,5 +14,7 @@ public interface ParticipantRepository {
 
   boolean existsById(Integer id);
 
+  boolean existsByEmail(String email);
+
   int nextId();
 }

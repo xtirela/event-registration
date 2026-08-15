@@ -4,7 +4,8 @@ public enum ActionType {
   CREATE_PARTICIPANT,
   CREATE_EVENT,
   REGISTER_PARTICIPANT,
-  CANCEL_REGISTRATION;
+  CANCEL_REGISTRATION,
+  NOT_FOUND;
 
   public static ActionType fromString(String input) {
     if (input == null) return null;

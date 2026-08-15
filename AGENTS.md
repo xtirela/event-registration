@@ -21,7 +21,7 @@ Repository Layer, хранение O(1) по ключу, лист ожидани
 
 ## Архитектура (состояние «Модуль 1» — цель «Модуля 2»)
 - Слои: view (ConsoleView, Main) → service (EventService / EventServiceImpl) → in-memory.
-- Хранилища пока НЕТ: EventServiceImpl держит HashMap<Integer,...> напрямую. Цель
+- Хранилища пока НЕТ: EventServiceImpl держит SimpleHashMap<Integer,...> напрямую. Цель
   «Модуля 2» — вынести Repository Layer, чтобы сервисы работали только через него.
 - GitHub Actions workflow и плагин JaCoCo ещё не настроены (их добавляет «Модуль 2»:
   CI-джобы checkstyle/build/test + отчёт по покрытию). Checkstyle берёт

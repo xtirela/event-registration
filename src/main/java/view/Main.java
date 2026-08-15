@@ -1,5 +1,6 @@
 package view;
 
+import config.RepositoryConfig;
 import java.util.InputMismatchException;
 import java.util.Scanner;
 import service.EventService;
@@ -8,7 +9,7 @@ import service.implementation.EventServiceImpl;
 public class Main {
   public static void main(String[] args) {
 
-    EventService eventService = new EventServiceImpl();
+    EventService eventService = new EventServiceImpl(RepositoryConfig.load());
     ConsoleView consoleView = new ConsoleView(eventService);
 
     Scanner scanner = new Scanner(System.in);

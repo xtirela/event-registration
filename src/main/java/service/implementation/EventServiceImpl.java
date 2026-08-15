@@ -1,6 +1,9 @@
 package service.implementation;
 
+import collection.SimpleLinkedList;
+import config.RepositoryConfig;
 import dto.*;
+import exception.DuplicateException;
 import exception.EventCapacityExceededException;
 import exception.EventNotFoundException;
 import exception.EventRegException;
@@ -27,15 +30,41 @@ import service.EventService;
 // @Primary
 public class EventServiceImpl implements EventService {
 
-  private final ParticipantRepository participantRepository = new ParticipantRepositoryImpl();
-  private final EventRepository eventRepository = new EventRepositoryImpl();
-  private final EventRegistrationRepository eventRegistrationRepository =
-      new EventRegistrationRepositoryImpl();
+  private final ParticipantRepository participantRepository;
+  private final EventRepository eventRepository;
+  private final EventRegistrationRepository eventRegistrationRepository;
 
-  private final List<ActionData> actionHistory = new LinkedList<>();
+  private final SimpleLinkedList<ActionData> actionHistory = new SimpleLinkedList<>();
+
+  public EventServiceImpl() {
+    participantRepository = new ParticipantRepositoryImpl();
+    eventRepository = new EventRepositoryImpl();
+    eventRegistrationRepository = new EventRegistrationRepositoryImpl();
+  }
+
+  public EventServiceImpl(RepositoryConfig config) {
+    participantRepository = new ParticipantRepositoryImpl(config.getParticipantCsvPath());
+    eventRepository = new EventRepositoryImpl(config.getEventCsvPath());
+    eventRegistrationRepository =
+        new EventRegistrationRepositoryImpl(config.getRegistrationCsvPath());
+  }
+
+  @Override
+  public UndoResponse getLatestAction() {
+    if (actionHistory.isEmpty()) {
+      throw new EventRegException("no action to undo", "undoLatestAction");
+    }
+    ActionData actionData = actionHistory.getLast();
+
+    return UndoResponse.builder()
+        .description("last action type to undo")
+        .type(actionData.getActionType())
+        .build();
+  }
 
   @Override
   public UndoResponse undoLatestAction() {
+
     if (actionHistory.isEmpty()) {
       throw new EventRegException("no action to undo", "undoLatestAction");
     }
@@ -104,6 +133,12 @@ public class EventServiceImpl implements EventService {
 
     checkValidCreateEvent(eventCreateRequest);
 
+    if (eventRepository.existsByName(eventCreateRequest.getEventName())) {
+      throw new DuplicateException(
+          "Event with name " + eventCreateRequest.getEventName() + " already exists",
+          "createEvent");
+    }
+
     Event event =
         Event.builder()
             .id(eventRepository.nextId())
@@ -136,6 +171,12 @@ public class EventServiceImpl implements EventService {
   public ParticipantResponse createParticipant(ParticipantCreateRequest participantCreateRequest) {
 
     checkValidCreateRequest(participantCreateRequest);
+
+    if (participantRepository.existsByEmail(participantCreateRequest.getEmail())) {
+      throw new DuplicateException(
+          "Participant with email " + participantCreateRequest.getEmail() + " already exists",
+          "createParticipant");
+    }
 
     Participant participant =
         Participant.builder()

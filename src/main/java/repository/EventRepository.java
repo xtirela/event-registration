@@ -14,5 +14,7 @@ public interface EventRepository {
 
   boolean existsById(Integer id);
 
+  boolean existsByName(String name);
+
   int nextId();
 }

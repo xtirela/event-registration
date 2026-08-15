@@ -36,6 +36,8 @@ public interface EventService {
 
   List<EventRegResponse> getRegistrationRequests();
 
+  UndoResponse getLatestAction();
+
   EventRegResponse changeRegistrationRequestStatus(
       int registrationId,
       EventRegRequestStatus eventRegRequestStatus,

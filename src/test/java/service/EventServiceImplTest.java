@@ -12,6 +12,7 @@ import dto.EventResponse;
 import dto.ParticipantCreateRequest;
 import dto.ParticipantResponse;
 import dto.UndoResponse;
+import exception.DuplicateException;
 import exception.EventCapacityExceededException;
 import exception.EventNotFoundException;
 import exception.EventRegException;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import service.implementation.EventServiceImpl;
 
+/** Unit tests for {@link EventServiceImpl}. */
 public class EventServiceImplTest {
 
   private EventService service;
@@ -125,6 +127,36 @@ public class EventServiceImplTest {
     register(1, 1);
     register(2, 1);
     service.changeRegistrationRequestStatus(2, EventRegRequestStatus.WAITING, "waiting", false);
+  }
+
+  // ---------- duplicates ----------
+
+  @Test
+  void givenDuplicateEventName_whenCreateEvent_thenDuplicateException() {
+    service.createEvent(event("Tech Conference", 18, 100));
+
+    assertThrows(
+        DuplicateException.class, () -> service.createEvent(event("Tech Conference", 18, 100)));
+  }
+
+  @Test
+  void givenDuplicateParticipantEmail_whenCreateParticipant_thenDuplicateException() {
+    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+
+    assertThrows(
+        DuplicateException.class,
+        () -> service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE)));
+  }
+
+  @Test
+  void givenUndoneParticipant_whenCreateParticipantWithSameEmail_thenParticipantCreated() {
+    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    service.undoLatestAction();
+
+    ParticipantResponse response =
+        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+
+    assertEquals("john@test.com", response.getEmail());
   }
 
   // ---------- createEvent ----------

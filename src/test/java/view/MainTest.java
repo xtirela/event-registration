@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import org.junit.jupiter.api.Test;
 
+/** Tests for {@link Main}. */
 public class MainTest {
 
   String captureOutput(Runnable action) {
