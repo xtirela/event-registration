@@ -4,6 +4,7 @@ import dto.*;
 import exception.EventRegException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.function.Predicate;
 import model.Event;
@@ -229,7 +230,15 @@ public class ConsoleView {
           eventService.getRegistrationRequests().forEach(System.out::println);
           break;
         case 14:
-          System.out.println(eventService.undoLatestAction());
+          System.out.println("Подвердите последнее действие для отмены: Y/N");
+          System.out.println(eventService.getLatestAction());
+          String undoActionInput = scanner.nextLine();
+          if (undoActionInput.equals("Y")) {
+            System.out.println(eventService.undoLatestAction());
+          } else if (!undoActionInput.equals("N")) {
+            System.out.println("Введено неправильное значение, по умолчанию действие не отменено");
+          }
+
           break;
         case 15:
           clearConsole();
@@ -246,13 +255,12 @@ public class ConsoleView {
               + eventRegException.getOperation()
               + " тип: "
               + eventRegException.getClass());
-    } catch (IllegalArgumentException illegalArgumentException) {
-      String operation =
-          illegalArgumentException instanceof exception.IllegalArgumentEventRegException iae
-              ? iae.getOperation()
-              : null;
+    } catch (NumberFormatException numberFormatException) {
       System.out.println(
-          "ОШИБКА: " + illegalArgumentException.getMessage() + " операция: " + operation);
+          "ОШИБКА: " + "введены неправильные значения чисел " + numberFormatException.getCause());
+    } catch (DateTimeParseException dateTimeParseException) {
+      System.out.println(
+          "ОШИБКА: " + "введены неправильные значения даты " + dateTimeParseException.getCause());
     }
   }
 }

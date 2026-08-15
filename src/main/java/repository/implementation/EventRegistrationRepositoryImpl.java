@@ -1,19 +1,81 @@
 package repository.implementation;
 
-import java.util.*;
+import collection.SimpleArrayList;
+import collection.SimpleHashMap;
+import collection.SimpleLinkedList;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import model.EventRegistration;
+import model.enums.EventRegRequestStatus;
+import repository.CsvFile;
 import repository.EventRegistrationRepository;
 
 public class EventRegistrationRepositoryImpl implements EventRegistrationRepository {
-  private final HashMap<Integer, EventRegistration> registrationRequests = new HashMap<>();
+  private final SimpleHashMap<Integer, EventRegistration> registrationRequests =
+      new SimpleHashMap<>();
 
-  private final HashMap<Integer, Deque<EventRegistration>> waitingQueue = new HashMap<>();
+  private final SimpleHashMap<Integer, SimpleLinkedList<EventRegistration>> waitingQueue =
+      new SimpleHashMap<>();
+
+  private final String csvPath;
 
   private int eventRegistrationCounter = 1;
 
+  public EventRegistrationRepositoryImpl() {
+    this(null);
+  }
+
+  public EventRegistrationRepositoryImpl(String csvPath) {
+    this.csvPath = csvPath;
+    load();
+  }
+
+  private void load() {
+    SimpleArrayList<String> lines = CsvFile.read(csvPath);
+    for (int i = 0; i < lines.size(); i++) {
+      String[] f = lines.get(i).split(",");
+      EventRegistration eventRegistration =
+          EventRegistration.builder()
+              .id(Integer.parseInt(f[0]))
+              .participantId(Integer.parseInt(f[1]))
+              .eventId(Integer.parseInt(f[2]))
+              .eventRegRequestStatus(EventRegRequestStatus.valueOf(f[3]))
+              .description(f[4])
+              .build();
+      registrationRequests.put(eventRegistration.getId(), eventRegistration);
+      if (eventRegistration.getId() >= eventRegistrationCounter) {
+        eventRegistrationCounter = eventRegistration.getId() + 1;
+      }
+      if (eventRegistration.getEventRegRequestStatus() == EventRegRequestStatus.WAITING) {
+        addToWaitingQueue(eventRegistration.getEventId(), eventRegistration);
+      }
+    }
+  }
+
+  private void saveCsv() {
+    SimpleArrayList<String> lines = new SimpleArrayList<>();
+    List<EventRegistration> ordered = new ArrayList<>(registrationRequests.values());
+    ordered.sort(Comparator.comparingInt(EventRegistration::getId));
+    for (EventRegistration eventRegistration : ordered) {
+      lines.add(
+          String.join(
+              ",",
+              String.valueOf(eventRegistration.getId()),
+              String.valueOf(eventRegistration.getParticipantId()),
+              String.valueOf(eventRegistration.getEventId()),
+              eventRegistration.getEventRegRequestStatus().name(),
+              eventRegistration.getDescription()));
+    }
+    CsvFile.write(csvPath, lines);
+  }
+
   @Override
   public EventRegistration save(EventRegistration eventRegistration) {
-    return registrationRequests.put(eventRegistration.getId(), eventRegistration);
+    EventRegistration saved =
+        registrationRequests.put(eventRegistration.getId(), eventRegistration);
+    saveCsv();
+    return saved;
   }
 
   @Override
@@ -22,13 +84,14 @@ public class EventRegistrationRepositoryImpl implements EventRegistrationReposit
   }
 
   @Override
-  public Collection<EventRegistration> findAll() {
-    return registrationRequests.values();
+  public List<EventRegistration> findAll() {
+    return new ArrayList<>(registrationRequests.values());
   }
 
   @Override
   public void delete(Integer id) {
     registrationRequests.remove(id);
+    saveCsv();
   }
 
   @Override
@@ -43,12 +106,12 @@ public class EventRegistrationRepositoryImpl implements EventRegistrationReposit
 
   @Override
   public void addToWaitingQueue(Integer eventId, EventRegistration eventRegistration) {
-    waitingQueue.computeIfAbsent(eventId, k -> new ArrayDeque<>()).addLast(eventRegistration);
+    waitingQueue.computeIfAbsent(eventId, k -> new SimpleLinkedList<>()).addLast(eventRegistration);
   }
 
   @Override
   public EventRegistration pollWaitingQueue(Integer eventId) {
-    Deque<EventRegistration> queue = waitingQueue.get(eventId);
+    SimpleLinkedList<EventRegistration> queue = waitingQueue.get(eventId);
     if (queue != null && !queue.isEmpty()) {
       return queue.removeFirst();
     }
@@ -57,14 +120,21 @@ public class EventRegistrationRepositoryImpl implements EventRegistrationReposit
 
   @Override
   public void removeFromWaitingQueue(Integer registrationId) {
-    waitingQueue
-        .values()
-        .forEach(queue -> queue.removeIf(er -> Integer.valueOf(er.getId()).equals(registrationId)));
-    waitingQueue.values().removeIf(Collection::isEmpty);
+    for (SimpleLinkedList<EventRegistration> queue : waitingQueue.values()) {
+      queue.removeIf(er -> er.getId() == registrationId);
+    }
   }
 
   @Override
   public List<EventRegistration> findAllInWaitingQueue() {
-    return waitingQueue.values().stream().flatMap(Collection::stream).toList();
+    List<EventRegistration> result = new ArrayList<>();
+
+    for (SimpleLinkedList<EventRegistration> queue : waitingQueue.values()) {
+      for (EventRegistration eventRegistration : queue) {
+        result.add(eventRegistration);
+      }
+    }
+
+    return result;
   }
 }

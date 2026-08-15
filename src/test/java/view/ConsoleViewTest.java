@@ -23,6 +23,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import service.EventService;
 import service.implementation.EventServiceImpl;
 
+/** Integration tests for {@link ConsoleView} menu actions. */
 public class ConsoleViewTest {
 
   private EventService eventService;
@@ -221,7 +222,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("validParticipantInputs")
-  void givenValidData_whenCreateParticipant_thenParticipantCreated(
+  void givenValidDataWhenCreateParticipantThenParticipantCreated(
       String input, String expectedFirstName) {
     performConsoleAction(1, input);
 
@@ -230,7 +231,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("edgeParticipantInputs")
-  void givenEdgeCaseData_whenCreateParticipant_thenParticipantCreated(
+  void givenEdgeCaseDataWhenCreateParticipantThenParticipantCreated(
       String input, String expectedFirstName) {
     performConsoleAction(1, input);
 
@@ -239,7 +240,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("invalidParticipantInputs")
-  void givenInvalidData_whenCreateParticipant_thenParticipantNotCreated(String input) {
+  void givenInvalidDataWhenCreateParticipantThenParticipantNotCreated(String input) {
     performConsoleAction(1, input);
 
     assertThrows(ParticipantNotFoundException.class, () -> eventService.getParticipantById(1));
@@ -249,7 +250,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("validEventInputs")
-  void givenValidData_whenCreateEvent_thenEventCreated(String input, String expectedName) {
+  void givenValidDataWhenCreateEventThenEventCreated(String input, String expectedName) {
     performConsoleAction(2, input);
 
     assertEquals(expectedName, eventService.getEventById(1).getEventName());
@@ -257,7 +258,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("edgeEventInputs")
-  void givenEdgeCaseData_whenCreateEvent_thenEventCreated(String input, String expectedName) {
+  void givenEdgeCaseDataWhenCreateEventThenEventCreated(String input, String expectedName) {
     performConsoleAction(2, input);
 
     assertEquals(expectedName, eventService.getEventById(1).getEventName());
@@ -265,7 +266,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("invalidEventInputs")
-  void givenInvalidData_whenCreateEvent_thenEventNotCreated(String input) {
+  void givenInvalidDataWhenCreateEventThenEventNotCreated(String input) {
     performConsoleAction(2, input);
 
     assertThrows(EventNotFoundException.class, () -> eventService.getEventById(1));
@@ -275,7 +276,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("validRegistrationInputs")
-  void givenValidData_whenRegisterParticipant_thenStatusAccepted(
+  void givenValidDataWhenRegisterParticipantThenStatusAccepted(
       String participantInput, String eventInput, String regInput, EventRegRequestStatus status) {
     performConsoleAction(1, participantInput);
     performConsoleAction(2, eventInput);
@@ -287,7 +288,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("edgeRegistrationInputs")
-  void givenEdgeCaseData_whenRegisterParticipant_thenStatusDenied(
+  void givenEdgeCaseDataWhenRegisterParticipantThenStatusDenied(
       String participantInput, String eventInput, String regInput, EventRegRequestStatus status) {
     performConsoleAction(1, participantInput);
     performConsoleAction(2, eventInput);
@@ -299,7 +300,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("missingParticipantRegistrationInputs")
-  void givenMissingParticipant_whenRegisterParticipant_thenRegistrationNotResolvable(
+  void givenMissingParticipantWhenRegisterParticipantThenRegistrationNotResolvable(
       String participantInput, String eventInput, String regInput) {
     performConsoleAction(1, participantInput);
     performConsoleAction(2, eventInput);
@@ -312,7 +313,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("missingEventRegistrationInputs")
-  void givenMissingEvent_whenRegisterParticipant_thenRegistrationNotResolvable(
+  void givenMissingEventWhenRegisterParticipantThenRegistrationNotResolvable(
       String participantInput, String eventInput, String regInput) {
     performConsoleAction(1, participantInput);
     performConsoleAction(2, eventInput);
@@ -368,7 +369,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("validCancelInputs")
-  void givenValidData_whenCancelRegistration_thenStatusCancelled(
+  void givenValidDataWhenCancelRegistrationThenStatusCancelled(
       String participantInput, String eventInput, String regInput, String cancelInput) {
     performConsoleAction(1, participantInput);
     performConsoleAction(2, eventInput);
@@ -383,7 +384,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("validCancelInputs")
-  void givenValidData_whenCancelRegistration_thenParticipantAmountZero(
+  void givenValidDataWhenCancelRegistrationThenParticipantAmountZero(
       String participantInput, String eventInput, String regInput, String cancelInput) {
     performConsoleAction(1, participantInput);
     performConsoleAction(2, eventInput);
@@ -396,7 +397,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("invalidCancelCreationInputs")
-  void givenInvalidCreation_whenCancelRegistration_thenRegistrationNotResolvable(
+  void givenInvalidCreationWhenCancelRegistrationThenRegistrationNotResolvable(
       String participantInput, String eventInput, String regInput, String cancelInput) {
     performConsoleAction(1, participantInput);
     performConsoleAction(2, eventInput);
@@ -410,7 +411,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("invalidCancelIdInputs")
-  void givenInvalidCancelId_whenCancelRegistration_thenRegistrationStaysAccepted(
+  void givenInvalidCancelIdWhenCancelRegistrationThenRegistrationStaysAccepted(
       String participantInput, String eventInput, String regInput, String cancelInput) {
     performConsoleAction(1, participantInput);
     performConsoleAction(2, eventInput);
@@ -558,7 +559,7 @@ public class ConsoleViewTest {
 
   @ParameterizedTest
   @MethodSource("sortFields")
-  void givenSortField_whenSortParticipants_thenAliceBeforeBob(String sortField) {
+  void givenSortFieldWhenSortParticipantsThenAliceBeforeBob(String sortField) {
     arrangeTwoParticipants();
 
     String output = captureOutput(() -> performConsoleAction(11, sortField));
@@ -624,7 +625,7 @@ public class ConsoleViewTest {
   void givenCreatedEvent_whenUndo_thenEventRemoved() {
     arrangeEvent();
 
-    performConsoleAction(14, "");
+    performConsoleAction(14, "Y");
 
     assertThrows(EventNotFoundException.class, () -> eventService.getEventById(1));
   }
@@ -633,7 +634,7 @@ public class ConsoleViewTest {
   void givenCreatedParticipant_whenUndo_thenParticipantRemoved() {
     arrangeParticipant();
 
-    performConsoleAction(14, "");
+    performConsoleAction(14, "Y");
 
     assertThrows(ParticipantNotFoundException.class, () -> eventService.getParticipantById(1));
   }
@@ -642,7 +643,7 @@ public class ConsoleViewTest {
   void givenRegistration_whenUndo_thenRegistrationRemoved() {
     arrangeRegistration();
 
-    performConsoleAction(14, "");
+    performConsoleAction(14, "Y");
 
     assertThrows(
         RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
@@ -653,6 +654,24 @@ public class ConsoleViewTest {
     String output = captureOutput(() -> performConsoleAction(14, ""));
 
     assertTrue(output.contains("ОШИБКА"));
+  }
+
+  @Test
+  void givenInvalidConfirmation_whenUndo_thenEventNotRemoved() {
+    arrangeEvent();
+
+    performConsoleAction(14, "X");
+
+    assertDoesNotThrow(() -> eventService.getEventById(1));
+  }
+
+  @Test
+  void givenNegativeConfirmation_whenUndo_thenEventNotRemoved() {
+    arrangeEvent();
+
+    performConsoleAction(14, "N");
+
+    assertDoesNotThrow(() -> eventService.getEventById(1));
   }
 
   // ---------- case 15: clear console ----------
