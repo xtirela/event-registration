@@ -92,10 +92,17 @@ public class SimpleArrayList<E> {
     return size;
   }
 
-  public void print() {
+  @Override
+  public String toString() {
+    StringBuilder sb = new StringBuilder("[");
     for (int i = 0; i < size; i++) {
-      System.out.println(elementArray[i]);
+      sb.append(elementArray[i]);
+      if (i < size - 1) {
+        sb.append(", ");
+      }
     }
+    sb.append("]");
+    return sb.toString();
   }
 
   public int indexOf(Object obj) {
