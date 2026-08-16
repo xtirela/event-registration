@@ -1,0 +1,28 @@
+# Gradle
+build/
+.gradle/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yaml
+.dockerignore
+
+# Логи и временные файлы
+*.log
+*.tmp
+
+# AI
+AGENTS.md
+CLAUDE.md
+.rules/

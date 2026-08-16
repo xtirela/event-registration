@@ -13,38 +13,42 @@ import model.enums.EventGenderRequirement;
 import model.enums.EventRegRequestStatus;
 import model.enums.EventRegistrationStatus;
 import model.enums.ParticipantGender;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import service.EventService;
 
 public class ConsoleView {
   private final EventService eventService;
+
+  private static final Logger log = LoggerFactory.getLogger(ConsoleView.class);
 
   public ConsoleView(EventService service) {
     eventService = service;
   }
 
   public void printMenu() {
-    System.out.println("=== Меню ===");
-    System.out.println("1. Создать участника");
-    System.out.println("2. Добавить мероприятие");
-    System.out.println("3. Зарегистрировать участника на мероприятие");
-    System.out.println("4. Отменить регистрацию");
-    System.out.println("5. Показать детали мероприятия");
-    System.out.println("6. Показать все мероприятия");
-    System.out.println("7. Показать все мероприятия c фильтрацией");
-    System.out.println("8. Показать все мероприятия c группировкой");
-    System.out.println("9. Показать участника");
-    System.out.println("10. Показать всех участников");
-    System.out.println("11. Показать всех участников с сортировкой");
-    System.out.println("12. Показать заявку регистрации");
-    System.out.println("13. Показать все заявки регистрации");
-    System.out.println("14. Отменить последнее действие");
-    System.out.println("15. Очистить консоль");
-    System.out.println("16. Выход");
+    log.info("=== Меню ===");
+    log.info("1. Создать участника");
+    log.info("2. Добавить мероприятие");
+    log.info("3. Зарегистрировать участника на мероприятие");
+    log.info("4. Отменить регистрацию");
+    log.info("5. Показать детали мероприятия");
+    log.info("6. Показать все мероприятия");
+    log.info("7. Показать все мероприятия c фильтрацией");
+    log.info("8. Показать все мероприятия c группировкой");
+    log.info("9. Показать участника");
+    log.info("10. Показать всех участников");
+    log.info("11. Показать всех участников с сортировкой");
+    log.info("12. Показать заявку регистрации");
+    log.info("13. Показать все заявки регистрации");
+    log.info("14. Отменить последнее действие");
+    log.info("15. Очистить консоль");
+    log.info("16. Выход");
   }
 
   private static void clearConsole() {
     for (int i = 0; i < 50; i++) {
-      System.out.println();
+      log.info("\n");
     }
   }
 
@@ -52,7 +56,7 @@ public class ConsoleView {
     try {
       switch (action) {
         case 1:
-          System.out.println(
+          log.info(
               "Введите данные участника через запятую без пробелов \nимя,фамилия,email,возраст,пол(MALE/FEMALE/NOT_SPECIFIED): ");
           String[] input = scanner.nextLine().split(",");
 
@@ -69,10 +73,10 @@ public class ConsoleView {
                   .age(Integer.parseInt(input[3]))
                   .participantGender(ParticipantGender.fromString(input[4]))
                   .build();
-          System.out.println(eventService.createParticipant(participantCreateRequest).toString());
+          log.info("{}", eventService.createParticipant(participantCreateRequest));
           break;
         case 2:
-          System.out.println(
+          log.info(
               "Введите данные мероприятия через запятую без пробелов \nназвание,место,дата(2026-12-31T20:00:00+03:00),продолжительность_часов,мин_возраст,макс_участников,гендер(NONE/MALE_ONLY/FEMALE_ONLY): ");
           String[] eventInput = scanner.nextLine().split(",");
           if (eventInput.length != 7) {
@@ -90,11 +94,11 @@ public class ConsoleView {
                   .genderRequirement(EventGenderRequirement.fromString(eventInput[6]))
                   .build();
 
-          System.out.println(eventService.createEvent(eventCreateRequest));
+          log.info("{}", eventService.createEvent(eventCreateRequest));
 
           break;
         case 3:
-          System.out.println(
+          log.info(
               "Введите данные через запятую без пробелов \nid участника для регистрации, id события на которое его зарегистрировать: ");
           String[] participantRegInput = scanner.nextLine().split(",");
           if (participantRegInput.length != 2) {
@@ -112,7 +116,7 @@ public class ConsoleView {
               .getEventById(eventId)
               .getEventRegistrationStatus()
               .equals(EventRegistrationStatus.ALL_RESERVED)) {
-            System.out.println(
+            log.info(
                 "Все места на событие забронированы, перевести участника в очередь ожидания? Y/N");
             String putInQueueInput = scanner.nextLine();
             if (putInQueueInput.equals("Y")) {
@@ -121,36 +125,38 @@ public class ConsoleView {
                   EventRegRequestStatus.WAITING,
                   "put in waiting queue for free spots",
                   true);
-              System.out.println("Участник успешно положен в очередь ожидания");
+              log.info("Участник успешно положен в очередь ожидания");
             } else if (!putInQueueInput.equals("N")) {
-              System.out.println(
+              log.warn(
                   "Введено неправильное значение, по умолчанию участник не будет переведён в очередь ожидания");
             }
           }
-          System.out.println(eventRegResponse);
+          log.info("{}", eventRegResponse);
 
           break;
         case 4:
-          System.out.print("Введите id регистрации для отмены: ");
+          log.info("Введите id регистрации для отмены: ");
           int regId = scanner.nextInt();
           scanner.nextLine();
-          System.out.println(
+          log.info(
+              "{}",
               eventService.changeRegistrationRequestStatus(
                   regId, EventRegRequestStatus.CANCELLED, "cancelled reg request", true));
           break;
         case 5:
-          System.out.print("Введите id мероприятия для поиска: ");
+          log.info("Введите id мероприятия для поиска: ");
           int eventDetailId = scanner.nextInt();
           scanner.nextLine();
-          System.out.println(eventService.getEventById(eventDetailId));
+          log.info("{}", eventService.getEventById(eventDetailId));
           break;
         case 6:
-          System.out.println("Список мероприятий: ");
-          eventService.getEvents().forEach(System.out::println);
-          System.out.println("\n");
+          log.info("{}", "Список мероприятий: ");
+          eventService.getEvents().forEach(event -> log.info("{}", event));
+          log.info("{}", "\n");
           break;
         case 7:
-          System.out.println(
+          log.info(
+              "{}",
               "Введите фильтр через запятую (пустые поля = без фильтра): \nдата(2026-12-31T20:00:00+03:00),место,мин_возраст: ");
           String[] filterInput = scanner.nextLine().split(",");
 
@@ -181,28 +187,28 @@ public class ConsoleView {
           List<Predicate<Event>> predicates =
               List.of(dateFilterPredicate, locationFilterPredicate, ageFilterPredicate);
 
-          System.out.println("Список мероприятий (с фильтрацией): ");
-          eventService.getEventsFiltered(predicates).forEach(System.out::println);
+          log.info("{}", "Список мероприятий (с фильтрацией): ");
+          eventService.getEventsFiltered(predicates).forEach(event -> log.info("{}", event));
           break;
         case 8:
-          System.out.println("Список мероприятий (с группировкой по месту): ");
+          log.info("{}", "Список мероприятий (с группировкой по месту): ");
           Map<String, List<EventResponse>> groupedEvents =
               eventService.getEventsGrouped(Event::getLocation);
 
-          groupedEvents.forEach((location, events) -> System.out.println(location + ": " + events));
+          groupedEvents.forEach((location, events) -> log.info("{}", location + ": " + events));
           break;
         case 9:
-          System.out.print("Введите id участника: ");
+          log.info("Введите id участника: ");
           int participantDetailId = scanner.nextInt();
           scanner.nextLine();
-          System.out.println(eventService.getParticipantById(participantDetailId));
+          log.info("{}", eventService.getParticipantById(participantDetailId));
           break;
         case 10:
-          System.out.println("Список участников:");
-          eventService.getParticipants().forEach(System.out::println);
+          log.info("{}", "Список участников:");
+          eventService.getParticipants().forEach(participant -> log.info("{}", participant));
           break;
         case 11:
-          System.out.println("Поле сортировки (AGE/NAME/GENDER/REGISTERED_AT): ");
+          log.info("{}", "Поле сортировки (AGE/NAME/GENDER/REGISTERED_AT): ");
 
           String sortField = scanner.nextLine().toUpperCase();
 
@@ -216,27 +222,27 @@ public class ConsoleView {
                     throw new exception.IllegalArgumentEventRegException(
                         "Некорректное поле сортировки", "performAction");
               };
-          System.out.println("Список участников (с сортировкой): ");
-          eventService.getParticipantsSorted(comparator).forEach(System.out::println);
+          log.info("{}", "Список участников (с сортировкой): ");
+          eventService.getParticipantsSorted(comparator).forEach(participant -> log.info("{}", participant));
           break;
         case 12:
-          System.out.print("Введите id заявки: ");
+          log.info("Введите id заявки: ");
           int requestId = scanner.nextInt();
           scanner.nextLine();
-          System.out.println(eventService.getRegistrationRequestById(requestId));
+          log.info("{}", eventService.getRegistrationRequestById(requestId));
           break;
         case 13:
-          System.out.println("Все заявки регистрации:");
-          eventService.getRegistrationRequests().forEach(System.out::println);
+          log.info("{}", "Все заявки регистрации:");
+          eventService.getRegistrationRequests().forEach(request -> log.info("{}", request));
           break;
         case 14:
-          System.out.println("Подвердите последнее действие для отмены: Y/N");
-          System.out.println(eventService.getLatestAction());
+          log.info("{}", "Подвердите последнее действие для отмены: Y/N");
+          log.info("{}", eventService.getLatestAction());
           String undoActionInput = scanner.nextLine();
           if (undoActionInput.equals("Y")) {
-            System.out.println(eventService.undoLatestAction());
+            log.info("{}", eventService.undoLatestAction());
           } else if (!undoActionInput.equals("N")) {
-            System.out.println("Введено неправильное значение, по умолчанию действие не отменено");
+            log.warn("{}", "Введено неправильное значение, по умолчанию действие не отменено");
           }
 
           break;
@@ -244,23 +250,29 @@ public class ConsoleView {
           clearConsole();
           break;
         default:
-          System.out.println("Введено некорректное значение!");
+          log.warn("{}", "Введено некорректное значение!");
           break;
       }
     } catch (EventRegException eventRegException) {
-      System.out.println(
+      log.error(
+          "{}",
           "ОШИБКА: "
               + eventRegException.getMessage()
               + " операция: "
               + eventRegException.getOperation()
               + " тип: "
-              + eventRegException.getClass());
+              + eventRegException.getClass(),
+          eventRegException);
     } catch (NumberFormatException numberFormatException) {
-      System.out.println(
-          "ОШИБКА: " + "введены неправильные значения чисел " + numberFormatException.getCause());
+      log.error(
+          "{}",
+          "ОШИБКА: " + "введены неправильные значения чисел " + numberFormatException.getCause(),
+          numberFormatException);
     } catch (DateTimeParseException dateTimeParseException) {
-      System.out.println(
-          "ОШИБКА: " + "введены неправильные значения даты " + dateTimeParseException.getCause());
+      log.error(
+          "{}",
+          "ОШИБКА: " + "введены неправильные значения даты " + dateTimeParseException.getCause(),
+          dateTimeParseException);
     }
   }
 }
