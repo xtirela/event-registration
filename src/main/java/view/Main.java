@@ -3,10 +3,14 @@ package view;
 import config.RepositoryConfig;
 import java.util.InputMismatchException;
 import java.util.Scanner;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import service.EventService;
 import service.implementation.EventServiceImpl;
 
 public class Main {
+  private static final Logger log = LoggerFactory.getLogger(Main.class);
+
   public static void main(String[] args) {
 
     EventService eventService = new EventServiceImpl(RepositoryConfig.load());
@@ -21,7 +25,7 @@ public class Main {
         input = scanner.nextInt();
       } catch (InputMismatchException e) {
         scanner.nextLine();
-        System.out.println("Неверный ввод, введите номер пункта меню");
+        log.warn("Неверный ввод, введите номер пункта меню");
         continue;
       }
       scanner.nextLine();
@@ -29,6 +33,6 @@ public class Main {
 
       consoleView.performAction(input, scanner);
     }
-    System.out.println("Завершение работы");
+    log.info("Завершение работы");
   }
 }

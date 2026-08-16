@@ -1,0 +1,26 @@
+services:
+  eventreg:
+    # Интерактивное консольное меню: docker compose up НЕ пробрасывает stdin в контейнер,
+    # поэтому запускать с клавиатурой нужно через: docker compose run --rm eventreg
+    build: .
+    image: eventreg:local
+    container_name: eventreg-app
+    stdin_open: true
+    tty: true
+    command: /app/bin/event-registration
+    volumes:
+      - app-data:/app/data
+    mem_limit: 512m
+    mem_reservation: 256m
+    mem_swappiness: 0
+    cpus: 0.5
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+volumes:
+  app-data:
+    name: eventreg-data
