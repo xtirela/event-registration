@@ -29,6 +29,11 @@ public class EventRegException extends RuntimeException {
     this.operation = operation;
   }
 
+  public EventRegException(String message, String operation, Throwable cause) {
+    super(message, cause);
+    this.operation = operation;
+  }
+
   public String getOperation() {
     return operation;
   }

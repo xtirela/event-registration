@@ -10,8 +10,8 @@ services:
     command: /app/bin/event-registration
     volumes:
       - app-data:/app/data
-    mem_limit: 512m
-    mem_reservation: 256m
+    mem_limit: 256m
+    mem_reservation: 128m
     mem_swappiness: 0
     cpus: 0.5
     pids_limit: 100
@@ -20,7 +20,77 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/eventreg_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    networks:
+      - eventreg-backend
+
+  postgres:
+    image: postgres:latest
+    container_name: eventreg-postgres
+
+    environment:
+      POSTGRES_DB: eventreg_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d eventreg_db" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+    networks:
+      - eventreg-backend
+
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: eventreg-pgadmin
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - eventreg-backend
+
+    restart: unless-stopped
+
 
 volumes:
   app-data:
     name: eventreg-data
+  postgres-data:
+    name: eventreg-postgres-data
+
+networks:
+  eventreg-backend:
+    name: eventreg-backend
+    driver: bridge
