@@ -44,6 +44,11 @@ public class ConsoleView {
     log.info("14. Отменить последнее действие");
     log.info("15. Очистить консоль");
     log.info("16. Выход");
+    log.info("17. getEventSummary");
+    log.info("18. groupByFillStatus");
+    log.info("19. findMostPopular");
+    log.info("20. searchByFragment");
+    log.info("21. findByCreatedBetween");
   }
 
   private static void clearConsole() {
@@ -173,7 +178,9 @@ public class ConsoleView {
               filterInput[2].isBlank() ? null : Integer.parseInt(filterInput[2]);
 
           Predicate<Event> dateFilterPredicate =
-              event -> (filterDate == null || event.getEventDate().equals(filterDate));
+              event ->
+                  (filterDate == null
+                      || event.getEventDate().toInstant().equals(filterDate.toInstant()));
 
           Predicate<Event> locationFilterPredicate =
               event ->
@@ -223,7 +230,9 @@ public class ConsoleView {
                         "Некорректное поле сортировки", "performAction");
               };
           log.info("{}", "Список участников (с сортировкой): ");
-          eventService.getParticipantsSorted(comparator).forEach(participant -> log.info("{}", participant));
+          eventService
+              .getParticipantsSorted(comparator)
+              .forEach(participant -> log.info("{}", participant));
           break;
         case 12:
           log.info("Введите id заявки: ");
@@ -249,6 +258,42 @@ public class ConsoleView {
         case 15:
           clearConsole();
           break;
+        case 17:
+          log.info("Введите id мероприятия для сводки: ");
+          int summaryEventId = scanner.nextInt();
+          scanner.nextLine();
+          log.info("{}", eventService.getEventSummary(summaryEventId));
+          break;
+        case 18:
+          log.info("{}", eventService.groupByFillStatus());
+          break;
+        case 19:
+          log.info("Введите количество мероприятий: ");
+          int limit = scanner.nextInt();
+          scanner.nextLine();
+          eventService.findMostPopular(limit).forEach(event -> log.info("{}", event));
+          break;
+        case 20:
+          log.info("Введите фрагмент имени для поиска: ");
+          String fragment = scanner.nextLine();
+          eventService
+              .searchByFragment(fragment)
+              .forEach(participant -> log.info("{}", participant));
+          break;
+        case 21:
+          log.info(
+              "Введите даты через запятую без пробелов (от,до) в формате 2026-12-31T20:00:00+03:00: ");
+          String[] dateInput = scanner.nextLine().split(",");
+          if (dateInput.length != 2) {
+            throw new exception.IllegalArgumentEventRegException(
+                "incorrect amount of elements", "performAction");
+          }
+          OffsetDateTime dateFrom = OffsetDateTime.parse(dateInput[0]);
+          OffsetDateTime dateTo = OffsetDateTime.parse(dateInput[1]);
+          eventService
+              .findByCreatedBetween(dateFrom, dateTo)
+              .forEach(registration -> log.info("{}", registration));
+          break;
         default:
           log.warn("{}", "Введено некорректное значение!");
           break;
@@ -273,6 +318,11 @@ public class ConsoleView {
           "{}",
           "ОШИБКА: " + "введены неправильные значения даты " + dateTimeParseException.getCause(),
           dateTimeParseException);
+    } catch (InputMismatchException inputMismatchException) {
+      log.error(
+          "{}",
+          "ОШИБКА: " + "введены неправильные значения ввода " + inputMismatchException.getCause(),
+          inputMismatchException);
     }
   }
 }

@@ -1,0 +1,22 @@
+databaseChangeLog:
+  - include:
+      file: changes/001-create-participant.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/002-create-event.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/003-create-registration.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/004-add-registration-created-at.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/005-add-event-registration-status-waitlist.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/006-rename-waiting-to-waitlist.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/007-assert-event-registration-status-waitlist.sql
+      relativeToChangelogFile: true

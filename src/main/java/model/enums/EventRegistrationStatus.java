@@ -3,7 +3,8 @@ package model.enums;
 public enum EventRegistrationStatus {
   ALL_RESERVED,
   RESERVATIONS_CLOSED,
-  RESERVATIONS_OPEN;
+  RESERVATIONS_OPEN,
+  WAITLIST;
 
   public static EventRegistrationStatus fromString(String input) {
     if (input == null) return null;

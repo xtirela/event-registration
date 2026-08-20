@@ -1,15 +1,8 @@
 package service.implementation;
 
 import collection.SimpleLinkedList;
-import config.RepositoryConfig;
 import dto.*;
-import exception.DuplicateException;
-import exception.EventCapacityExceededException;
-import exception.EventNotFoundException;
-import exception.EventRegException;
-import exception.IllegalArgumentEventRegException;
-import exception.ParticipantNotFoundException;
-import exception.RegistrationNotFoundException;
+import exception.*;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.function.Function;
@@ -21,9 +14,6 @@ import model.enums.*;
 import repository.EventRegistrationRepository;
 import repository.EventRepository;
 import repository.ParticipantRepository;
-import repository.implementation.EventRegistrationRepositoryImpl;
-import repository.implementation.EventRepositoryImpl;
-import repository.implementation.ParticipantRepositoryImpl;
 import service.EventService;
 
 // @Component
@@ -36,17 +26,13 @@ public class EventServiceImpl implements EventService {
 
   private final SimpleLinkedList<ActionData> actionHistory = new SimpleLinkedList<>();
 
-  public EventServiceImpl() {
-    participantRepository = new ParticipantRepositoryImpl();
-    eventRepository = new EventRepositoryImpl();
-    eventRegistrationRepository = new EventRegistrationRepositoryImpl();
-  }
-
-  public EventServiceImpl(RepositoryConfig config) {
-    participantRepository = new ParticipantRepositoryImpl(config.getParticipantCsvPath());
-    eventRepository = new EventRepositoryImpl(config.getEventCsvPath());
-    eventRegistrationRepository =
-        new EventRegistrationRepositoryImpl(config.getRegistrationCsvPath());
+  public EventServiceImpl(
+      EventRepository eventRepository,
+      ParticipantRepository participantRepository,
+      EventRegistrationRepository registrationRepository) {
+    this.eventRepository = eventRepository;
+    this.participantRepository = participantRepository;
+    this.eventRegistrationRepository = registrationRepository;
   }
 
   @Override
@@ -141,7 +127,6 @@ public class EventServiceImpl implements EventService {
 
     Event event =
         Event.builder()
-            .id(eventRepository.nextId())
             .createdAt(OffsetDateTime.now())
             .eventName(eventCreateRequest.getEventName())
             .location(eventCreateRequest.getLocation())
@@ -180,7 +165,6 @@ public class EventServiceImpl implements EventService {
 
     Participant participant =
         Participant.builder()
-            .id(participantRepository.nextId())
             .firstName(participantCreateRequest.getFirstName())
             .lastName(participantCreateRequest.getLastName())
             .email(participantCreateRequest.getEmail())
@@ -213,43 +197,32 @@ public class EventServiceImpl implements EventService {
   @Override
   public EventRegResponse registerParticipant(EventRegRequest eventRegRequest) {
 
-    EventRegistration eventRegistration =
-        EventRegistration.builder()
-            .id(eventRegistrationRepository.nextId())
-            .participantId(eventRegRequest.getParticipantId())
-            .eventId(eventRegRequest.getEventId())
-            .eventRegRequestStatus(EventRegRequestStatus.PENDING)
-            .build();
-
     Participant participant = participantRepository.findById(eventRegRequest.getParticipantId());
-
     if (participant == null) {
-
-      eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-      eventRegistrationRepository.save(eventRegistration);
-
       throw new ParticipantNotFoundException(
           eventRegRequest.getParticipantId(), "registerParticipant");
     }
 
     Event event = eventRepository.findById(eventRegRequest.getEventId());
     if (event == null) {
-
-      eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.DENIED);
-      eventRegistrationRepository.save(eventRegistration);
-
-      throw new EventNotFoundException(
-          eventRegistration.getEventId(), eventRegistration.getId(), "registerParticipant");
+      throw new EventNotFoundException(eventRegRequest.getEventId(), "registerParticipant");
     }
 
-    eventRegistration.setDescription("Request undergoing review...");
-    eventRegistration.setEventRegRequestStatus(EventRegRequestStatus.PENDING);
+    EventRegistration eventRegistration =
+        EventRegistration.builder()
+            .participantId(eventRegRequest.getParticipantId())
+            .eventId(eventRegRequest.getEventId())
+            .eventRegRequestStatus(EventRegRequestStatus.PENDING)
+            .description("Request undergoing review...")
+            .createdAt(OffsetDateTime.now())
+            .build();
 
     eventRegistrationRepository.save(eventRegistration);
 
+    reviewParticipant(participant, event, eventRegistration);
+
     //    CompletableFuture.runAsync(() -> reviewParticipant(participant, event,
     // eventRegistration));
-    reviewParticipant(participant, event, eventRegistration);
 
     addActionToHistory(
         ActionType.REGISTER_PARTICIPANT,
@@ -260,7 +233,8 @@ public class EventServiceImpl implements EventService {
         null,
         null);
 
-    return eventRegistrationToEventRegResponse(eventRegistration);
+    return eventRegistrationToEventRegResponse(
+        eventRegistrationRepository.findById(eventRegistration.getId()));
   }
 
   private void deleteParticipantRegistration(Integer participantRegistrationId) {
@@ -278,7 +252,7 @@ public class EventServiceImpl implements EventService {
       }
       if (eventRegistration.getEventRegRequestStatus().equals(EventRegRequestStatus.ACCEPTED)) {
         event.setCurrentParticipantAmount(event.getCurrentParticipantAmount() - 1);
-        eventRepository.save(event);
+        eventRepository.update(event);
       }
       if (eventRegistration.getEventRegRequestStatus().equals(EventRegRequestStatus.WAITING)) {
         eventRegistrationRepository.removeFromWaitingQueue(eventRegistration.getId());
@@ -346,6 +320,46 @@ public class EventServiceImpl implements EventService {
   }
 
   @Override
+  public EventSummary getEventSummary(int eventId) {
+    EventSummary eventSummary = eventRepository.getEventSummary(eventId);
+    if (eventSummary != null) {
+      return (eventSummary);
+    } else {
+      throw new EventNotFoundException(eventId, "getEventSummary");
+    }
+  }
+
+  @Override
+  public Map<String, Long> groupByFillStatus() {
+    Map<String, Long> result = eventRepository.groupByFillStatus();
+    if (!result.isEmpty()) {
+      return result;
+    } else {
+      throw new NoEventsPresentException("no events have been found", "groupByFillStatus");
+    }
+  }
+
+  @Override
+  public List<Event> findMostPopular(int limit) {
+    List<Event> result = eventRepository.findMostPopular(limit);
+    if (!result.isEmpty()) {
+      return result;
+    } else {
+      throw new NoEventsPresentException("no events have been found", "findMostPopular");
+    }
+  }
+
+  @Override
+  public List<EventRegistration> findByCreatedBetween(OffsetDateTime from, OffsetDateTime to) {
+    return eventRegistrationRepository.findByCreatedBetween(from, to);
+  }
+
+  @Override
+  public List<Participant> searchByFragment(String fragment) {
+    return participantRepository.searchByFragment(fragment);
+  }
+
+  @Override
   public Map<String, List<EventResponse>> getEventsGrouped(Function<Event, String> classifier) {
     return eventRepository.findAll().stream()
         .collect(
@@ -395,6 +409,7 @@ public class EventServiceImpl implements EventService {
   @Override
   public List<EventRegResponse> getRegistrationRequestsInWaitingQueue(Integer eventId) {
     return eventRegistrationRepository.findAllInWaitingQueue().stream()
+        .filter(e -> e.getEventId() == eventId)
         .map(this::eventRegistrationToEventRegResponse)
         .toList();
   }
@@ -414,10 +429,6 @@ public class EventServiceImpl implements EventService {
           "automatic accept after waiting for queue turn",
           false);
     }
-    //        else
-    //        {
-    //            throw new RuntimeException("waiting queue is empty for event " + eventId);
-    //        }
   }
 
   // TODO: снести и переделать на логику чище когда будет переход на spring
@@ -448,23 +459,31 @@ public class EventServiceImpl implements EventService {
 
       if (eventRegistration.getEventRegRequestStatus().equals(EventRegRequestStatus.ACCEPTED)) {
         event.setCurrentParticipantAmount(event.getCurrentParticipantAmount() - 1);
+        eventRepository.update(event);
         List<EventRegResponse> waiting = getRegistrationRequestsInWaitingQueue(event.getId());
         if (!waiting.isEmpty()) {
           registeredRegistrationId = waiting.getFirst().getRegistrationId();
           registeredEventRegRequestStatus = waiting.getFirst().getEventRegRequestStatus();
-        }
 
-        pollWaitingQueue(eventRegistration.getEventId());
+          pollWaitingQueue(eventRegistration.getEventId());
+          event = eventRepository.findById(eventRegistration.getEventId());
+        }
       }
 
       switch (eventRegRequestStatus) {
         case EventRegRequestStatus.WAITING:
-          addToWaitingQueue(eventRegistration);
+          addToWaitingQueue(event, eventRegistration);
           break;
         case EventRegRequestStatus.ACCEPTED:
           if (event.getCurrentParticipantAmount() + 1 > event.getMaxParticipantAmount()) {
             throw new EventCapacityExceededException(
                 event.getId(), "changeRegistrationRequestStatus");
+          }
+          if (event.getCurrentParticipantAmount() == (event.getMaxParticipantAmount())
+              && event
+                  .getEventRegistrationStatus()
+                  .equals(EventRegistrationStatus.RESERVATIONS_OPEN)) {
+            event.setEventRegistrationStatus(EventRegistrationStatus.ALL_RESERVED);
           }
           event.setCurrentParticipantAmount(event.getCurrentParticipantAmount() + 1);
           break;
@@ -486,9 +505,9 @@ public class EventServiceImpl implements EventService {
 
       eventRegistration.setEventRegRequestStatus(eventRegRequestStatus);
       eventRegistration.setDescription(description);
-      eventRegistrationRepository.save(eventRegistration);
+      eventRepository.update(event);
 
-      eventRepository.save(event);
+      eventRegistrationRepository.update(eventRegistration);
 
       return eventRegistrationToEventRegResponse(eventRegistration);
     } else {
@@ -496,16 +515,9 @@ public class EventServiceImpl implements EventService {
     }
   }
 
-  private void addToWaitingQueue(EventRegistration eventRegistration) {
-    Event event = eventRepository.findById(eventRegistration.getEventId());
-    if (event == null) {
-      throw new EventNotFoundException(
-          eventRegistration.getEventId(), eventRegistration.getId(), "addToWaitingQueue");
-    }
-
-    eventRepository.save(event);
-    eventRegistrationRepository.addToWaitingQueue(
-        eventRegistration.getEventId(), eventRegistration);
+  private void addToWaitingQueue(Event event, EventRegistration eventRegistration) {
+    eventRegistrationRepository.addToWaitingQueue(eventRegistration);
+    event.setEventRegistrationStatus(EventRegistrationStatus.WAITLIST);
   }
 
   private void reviewParticipant(
@@ -529,8 +541,10 @@ public class EventServiceImpl implements EventService {
     }
 
     if (event.getCurrentParticipantAmount() >= event.getMaxParticipantAmount()) {
-      event.setEventRegistrationStatus(EventRegistrationStatus.ALL_RESERVED);
-      eventRepository.save(event);
+      if (event.getEventRegistrationStatus().equals(EventRegistrationStatus.RESERVATIONS_OPEN)) {
+        event.setEventRegistrationStatus(EventRegistrationStatus.ALL_RESERVED);
+      }
+      eventRepository.update(event);
       changeRegistrationRequestStatus(
           eventRegistration.getId(),
           model.enums.EventRegRequestStatus.DENIED,

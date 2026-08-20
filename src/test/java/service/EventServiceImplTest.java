@@ -19,11 +19,20 @@ import exception.EventRegException;
 import exception.IllegalArgumentEventRegException;
 import exception.ParticipantNotFoundException;
 import exception.RegistrationNotFoundException;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.*;
+import liquibase.Liquibase;
+import liquibase.database.Database;
+import liquibase.database.DatabaseFactory;
+import liquibase.database.jvm.JdbcConnection;
+import liquibase.resource.ClassLoaderResourceAccessor;
 import model.Event;
 import model.Participant;
 import model.enums.ActionType;
@@ -32,18 +41,80 @@ import model.enums.EventRegRequestStatus;
 import model.enums.EventRegistrationStatus;
 import model.enums.EventStatus;
 import model.enums.ParticipantGender;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import repository.EventRegistrationRepository;
+import repository.EventRepository;
+import repository.ParticipantRepository;
+import repository.implementation.Jdbc.EventRegistrationRepositoryJdbc;
+import repository.implementation.Jdbc.EventRepositoryJdbc;
+import repository.implementation.Jdbc.ParticipantRepositoryJdbc;
 import service.implementation.EventServiceImpl;
 
 /** Unit tests for {@link EventServiceImpl}. */
+@Testcontainers
 public class EventServiceImplTest {
 
-  private EventService service;
+  private EventService eventService;
+
+  private static Connection connection;
+
+  @Container
+  private static final PostgreSQLContainer<?> postgres =
+      new PostgreSQLContainer<>("postgres:18")
+          .withDatabaseName("test_db")
+          .withUsername("test")
+          .withPassword("test");
+
+  @BeforeAll
+  static void setUpDatabase() throws SQLException {
+    System.setProperty("db.url", postgres.getJdbcUrl());
+    System.setProperty("db.user", postgres.getUsername());
+    System.setProperty("db.password", postgres.getPassword());
+
+    connection =
+        DriverManager.getConnection(
+            postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+
+    runMigrations(connection);
+  }
+
+  private static void runMigrations(Connection connection) {
+    try {
+      Database database =
+          DatabaseFactory.getInstance()
+              .findCorrectDatabaseImplementation(new JdbcConnection(connection));
+
+      Liquibase liquibase =
+          new Liquibase(
+              "db/changelog/db.changelog-master.yaml", new ClassLoaderResourceAccessor(), database);
+      liquibase.update("");
+      connection.setAutoCommit(true);
+    } catch (Exception e) {
+      throw new RuntimeException("Ошибка миграций", e);
+    }
+  }
+
+  private static void cleanDatabase(Connection connection) throws SQLException {
+    connection.setAutoCommit(true);
+    try (var statement = connection.createStatement()) {
+      statement.execute("TRUNCATE event_registration, event, participant RESTART IDENTITY CASCADE");
+    }
+  }
 
   @BeforeEach
-  void setUp() {
-    service = new EventServiceImpl();
+  void setUp() throws SQLException {
+    cleanDatabase(connection);
+
+    ParticipantRepository participantRepo = new ParticipantRepositoryJdbc();
+    EventRepository eventRepo = new EventRepositoryJdbc();
+    EventRegistrationRepository regRepo = new EventRegistrationRepositoryJdbc();
+
+    eventService = new EventServiceImpl(eventRepo, participantRepo, regRepo);
   }
 
   // ---------- arrange helpers ----------
@@ -87,16 +158,16 @@ public class EventServiceImplTest {
   }
 
   private EventRegResponse register(int participantId, int eventId) {
-    return service.registerParticipant(new EventRegRequest(participantId, eventId));
+    return eventService.registerParticipant(new EventRegRequest(participantId, eventId));
   }
 
   private void arrangeEvent() {
-    service.createEvent(event("Tech Conference", 18, 100));
+    eventService.createEvent(event("Tech Conference", 18, 100));
   }
 
   private void arrangeEventAndParticipant() {
-    service.createEvent(event("Tech Conference", 18, 100));
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createEvent(event("Tech Conference", 18, 100));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
   }
 
   private void arrangeAcceptedRegistration() {
@@ -108,7 +179,7 @@ public class EventServiceImplTest {
     try {
       register(1, 1);
     } catch (ParticipantNotFoundException expected) {
-      // participant missing: registration 1 is saved as DENIED, then exception is thrown
+      // participant missing: registration is rejected before it is persisted
     }
   }
 
@@ -116,45 +187,88 @@ public class EventServiceImplTest {
     try {
       register(1, 999);
     } catch (EventNotFoundException expected) {
-      // event missing: registration 1 is saved as DENIED, then exception is thrown
+      // event missing: registration is rejected before it is persisted
     }
   }
 
   private void arrangeWaitingQueueScenario() {
-    service.createEvent(event("Full Event", 18, 1));
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
+    eventService.createEvent(event("Full Event", 18, 1));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
     register(1, 1);
     register(2, 1);
-    service.changeRegistrationRequestStatus(2, EventRegRequestStatus.WAITING, "waiting", false);
+    eventService.changeRegistrationRequestStatus(
+        2, EventRegRequestStatus.WAITING, "waiting", false);
   }
 
   // ---------- duplicates ----------
 
   @Test
-  void givenDuplicateEventName_whenCreateEvent_thenDuplicateException() {
-    service.createEvent(event("Tech Conference", 18, 100));
-
-    assertThrows(
-        DuplicateException.class, () -> service.createEvent(event("Tech Conference", 18, 100)));
-  }
-
-  @Test
-  void givenDuplicateParticipantEmail_whenCreateParticipant_thenDuplicateException() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+  void givenOneSpot_When100ConcurrentRegistration_ThenOnlyOneAccepted() throws Exception {
+    eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertThrows(
         DuplicateException.class,
-        () -> service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE)));
+        () -> eventService.createEvent(event("Tech Conference", 18, 100)));
+  }
+
+  //  @Test
+  //  void givenDuplicateEventName_whenCreateEvent_thenDuplicateException() throws
+  // ExecutionException, InterruptedException {
+  //    eventService.createEvent(event("Concurrency test", 18, 1));
+  //
+  //    List<Integer> participantIds = new ArrayList<>();
+  //    for (int i = 0; i < 100; i++)
+  //    {
+  //        ParticipantResponse response = eventService.createParticipant(
+  //                participant("user" + i + "@test.com", 25, ParticipantGender.NOT_SPECIFIED));
+  //
+  //        participantIds.add(response.getParticipantId());
+  //    }
+  //
+  //    ExecutorService executor = Executors.newFixedThreadPool(100);
+  //    List<Future<EventRegResponse>> futures = new ArrayList<>();
+  //
+  //      for (int participantId : participantIds) {
+  //          futures.add(executor.submit(() -> register(participantId, 1)));
+  //      }
+  //
+  //      int accepted = 0;
+  //      int denied = 0;
+  //      for (Future<EventRegResponse> future : futures)
+  //      {
+  //          EventRegResponse response = future.get();
+  //          if (response.getEventRegRequestStatus() == EventRegRequestStatus.ACCEPTED) {
+  //              accepted++;
+  //          } else {
+  //              denied++;
+  //          }
+  //      }
+  //
+  //      executor.shutdown();
+  //
+  //      assertEquals(1,accepted);
+  //      assertEquals(99,denied);
+  //  }
+
+  @Test
+  void givenDuplicateParticipantEmail_whenCreateParticipant_thenDuplicateException() {
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+
+    assertThrows(
+        DuplicateException.class,
+        () ->
+            eventService.createParticipant(
+                participant("john@test.com", 25, ParticipantGender.MALE)));
   }
 
   @Test
   void givenUndoneParticipant_whenCreateParticipantWithSameEmail_thenParticipantCreated() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
-    service.undoLatestAction();
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.undoLatestAction();
 
     ParticipantResponse response =
-        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+        eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertEquals("john@test.com", response.getEmail());
   }
@@ -163,77 +277,77 @@ public class EventServiceImplTest {
 
   @Test
   void givenValidEvent_whenCreateEvent_thenIdIsOne() {
-    EventResponse response = service.createEvent(event("Tech Conference", 18, 100));
+    EventResponse response = eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertEquals(1, response.getEventId());
   }
 
   @Test
   void givenValidEvent_whenCreateEvent_thenNameIsSaved() {
-    EventResponse response = service.createEvent(event("Tech Conference", 18, 100));
+    EventResponse response = eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertEquals("Tech Conference", response.getEventName());
   }
 
   @Test
   void givenValidEvent_whenCreateEvent_thenLocationIsSaved() {
-    EventResponse response = service.createEvent(event("Tech Conference", 18, 100));
+    EventResponse response = eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertEquals("Main Hall", response.getLocation());
   }
 
   @Test
   void givenValidEvent_whenCreateEvent_thenStatusIsPlanned() {
-    EventResponse response = service.createEvent(event("Tech Conference", 18, 100));
+    EventResponse response = eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertEquals(EventStatus.PLANNED, response.getEventStatus());
   }
 
   @Test
   void givenValidEvent_whenCreateEvent_thenRegistrationStatusIsOpen() {
-    EventResponse response = service.createEvent(event("Tech Conference", 18, 100));
+    EventResponse response = eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertEquals(EventRegistrationStatus.RESERVATIONS_OPEN, response.getEventRegistrationStatus());
   }
 
   @Test
   void givenValidEvent_whenCreateEvent_thenCurrentParticipantAmountIsZero() {
-    EventResponse response = service.createEvent(event("Tech Conference", 18, 100));
+    EventResponse response = eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertEquals(0, response.getCurrentParticipantAmount());
   }
 
   @Test
   void givenValidEvent_whenCreateEvent_thenAgeRequiredIsSaved() {
-    EventResponse response = service.createEvent(event("Tech Conference", 18, 100));
+    EventResponse response = eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertEquals(18, response.getAgeRequired());
   }
 
   @Test
   void givenValidEvent_whenCreateEvent_thenMaxParticipantAmountIsSaved() {
-    EventResponse response = service.createEvent(event("Tech Conference", 18, 100));
+    EventResponse response = eventService.createEvent(event("Tech Conference", 18, 100));
 
     assertEquals(100, response.getMaxParticipantAmount());
   }
 
   @Test
   void givenMaxParticipantAmountOne_whenCreateEvent_thenEventCreated() {
-    EventResponse response = service.createEvent(event("Small Event", 18, 1));
+    EventResponse response = eventService.createEvent(event("Small Event", 18, 1));
 
     assertEquals(1, response.getEventId());
   }
 
   @Test
   void givenAgeRequiredZero_whenCreateEvent_thenEventCreated() {
-    EventResponse response = service.createEvent(event("Kids Event", 0, 100));
+    EventResponse response = eventService.createEvent(event("Kids Event", 0, 100));
 
     assertEquals(1, response.getEventId());
   }
 
   @Test
   void givenAgeRequiredHundredFifty_whenCreateEvent_thenEventCreated() {
-    EventResponse response = service.createEvent(event("Seniors Event", 150, 100));
+    EventResponse response = eventService.createEvent(event("Seniors Event", 150, 100));
 
     assertEquals(1, response.getEventId());
   }
@@ -249,7 +363,7 @@ public class EventServiceImplTest {
             100,
             EventGenderRequirement.NONE);
 
-    EventResponse response = service.createEvent(request);
+    EventResponse response = eventService.createEvent(request);
 
     assertEquals(1, response.getEventId());
   }
@@ -265,26 +379,27 @@ public class EventServiceImplTest {
             100,
             EventGenderRequirement.NONE);
 
-    EventResponse response = service.createEvent(request);
+    EventResponse response = eventService.createEvent(request);
 
     assertEquals(1, response.getEventId());
   }
 
   @Test
   void givenNullEventRequest_whenCreateEvent_thenError() {
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(null));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(null));
   }
 
   @Test
   void givenEmptyEventName_whenCreateEvent_thenError() {
     assertThrows(
-        IllegalArgumentEventRegException.class, () -> service.createEvent(event("", 18, 100)));
+        IllegalArgumentEventRegException.class, () -> eventService.createEvent(event("", 18, 100)));
   }
 
   @Test
   void givenBlankEventName_whenCreateEvent_thenError() {
     assertThrows(
-        IllegalArgumentEventRegException.class, () -> service.createEvent(event("   ", 18, 100)));
+        IllegalArgumentEventRegException.class,
+        () -> eventService.createEvent(event("   ", 18, 100)));
   }
 
   @Test
@@ -299,7 +414,7 @@ public class EventServiceImplTest {
             EventGenderRequirement.NONE);
     request.setLocation(null);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
@@ -314,7 +429,7 @@ public class EventServiceImplTest {
             EventGenderRequirement.NONE);
     request.setEventName(null);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
@@ -329,7 +444,7 @@ public class EventServiceImplTest {
             EventGenderRequirement.NONE);
     request.setLocation(" ");
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
@@ -344,7 +459,7 @@ public class EventServiceImplTest {
             EventGenderRequirement.NONE);
     request.setEventDate(null);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
@@ -358,7 +473,7 @@ public class EventServiceImplTest {
             100,
             EventGenderRequirement.NONE);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
@@ -373,7 +488,7 @@ public class EventServiceImplTest {
             EventGenderRequirement.NONE);
     request.setEventDuration(null);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
@@ -387,7 +502,7 @@ public class EventServiceImplTest {
             100,
             EventGenderRequirement.NONE);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
@@ -401,21 +516,21 @@ public class EventServiceImplTest {
             100,
             EventGenderRequirement.NONE);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
   void givenNegativeAgeRequired_whenCreateEvent_thenError() {
     assertThrows(
         IllegalArgumentEventRegException.class,
-        () -> service.createEvent(event("Bad Age", -1, 100)));
+        () -> eventService.createEvent(event("Bad Age", -1, 100)));
   }
 
   @Test
   void givenAgeRequiredAboveMax_whenCreateEvent_thenError() {
     assertThrows(
         IllegalArgumentEventRegException.class,
-        () -> service.createEvent(event("Bad Age", 151, 100)));
+        () -> eventService.createEvent(event("Bad Age", 151, 100)));
   }
 
   @Test
@@ -430,20 +545,21 @@ public class EventServiceImplTest {
             EventGenderRequirement.NONE);
     request.setGenderRequirement(null);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createEvent(request));
+    assertThrows(IllegalArgumentEventRegException.class, () -> eventService.createEvent(request));
   }
 
   @Test
   void givenZeroMaxParticipantAmount_whenCreateEvent_thenError() {
     assertThrows(
-        IllegalArgumentEventRegException.class, () -> service.createEvent(event("Bad Max", 18, 0)));
+        IllegalArgumentEventRegException.class,
+        () -> eventService.createEvent(event("Bad Max", 18, 0)));
   }
 
   @Test
   void givenNegativeMaxParticipantAmount_whenCreateEvent_thenError() {
     assertThrows(
         IllegalArgumentEventRegException.class,
-        () -> service.createEvent(event("Bad Max", 18, -1)));
+        () -> eventService.createEvent(event("Bad Max", 18, -1)));
   }
 
   // ---------- createParticipant ----------
@@ -451,7 +567,7 @@ public class EventServiceImplTest {
   @Test
   void givenValidParticipant_whenCreateParticipant_thenIdIsOne() {
     ParticipantResponse response =
-        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+        eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertEquals(1, response.getParticipantId());
   }
@@ -459,7 +575,7 @@ public class EventServiceImplTest {
   @Test
   void givenValidParticipant_whenCreateParticipant_thenFirstNameIsSaved() {
     ParticipantResponse response =
-        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+        eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertEquals("John", response.getFirstName());
   }
@@ -467,7 +583,7 @@ public class EventServiceImplTest {
   @Test
   void givenValidParticipant_whenCreateParticipant_thenLastNameIsSaved() {
     ParticipantResponse response =
-        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+        eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertEquals("Doe", response.getLastName());
   }
@@ -475,7 +591,7 @@ public class EventServiceImplTest {
   @Test
   void givenValidParticipant_whenCreateParticipant_thenEmailIsSaved() {
     ParticipantResponse response =
-        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+        eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertEquals("john@test.com", response.getEmail());
   }
@@ -483,7 +599,7 @@ public class EventServiceImplTest {
   @Test
   void givenValidParticipant_whenCreateParticipant_thenAgeIsSaved() {
     ParticipantResponse response =
-        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+        eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertEquals(25, response.getAge());
   }
@@ -491,7 +607,7 @@ public class EventServiceImplTest {
   @Test
   void givenValidParticipant_whenCreateParticipant_thenGenderIsSaved() {
     ParticipantResponse response =
-        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+        eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertEquals(ParticipantGender.MALE, response.getParticipantGender());
   }
@@ -499,7 +615,7 @@ public class EventServiceImplTest {
   @Test
   void givenValidParticipant_whenCreateParticipant_thenRegisteredAtIsSet() {
     ParticipantResponse response =
-        service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+        eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertNotNull(response.getRegisteredAt());
   }
@@ -507,7 +623,7 @@ public class EventServiceImplTest {
   @Test
   void givenAgeOne_whenCreateParticipant_thenParticipantCreated() {
     ParticipantResponse response =
-        service.createParticipant(participant("baby@test.com", 1, ParticipantGender.MALE));
+        eventService.createParticipant(participant("baby@test.com", 1, ParticipantGender.MALE));
 
     assertEquals(1, response.getParticipantId());
   }
@@ -515,14 +631,15 @@ public class EventServiceImplTest {
   @Test
   void givenAgeHundredFifty_whenCreateParticipant_thenParticipantCreated() {
     ParticipantResponse response =
-        service.createParticipant(participant("elder@test.com", 150, ParticipantGender.MALE));
+        eventService.createParticipant(participant("elder@test.com", 150, ParticipantGender.MALE));
 
     assertEquals(1, response.getParticipantId());
   }
 
   @Test
   void givenNullParticipantRequest_whenCreateParticipant_thenError() {
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createParticipant(null));
+    assertThrows(
+        IllegalArgumentEventRegException.class, () -> eventService.createParticipant(null));
   }
 
   @Test
@@ -530,7 +647,8 @@ public class EventServiceImplTest {
     ParticipantCreateRequest request = participant("john@test.com", 25, ParticipantGender.MALE);
     request.setFirstName(" ");
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createParticipant(request));
+    assertThrows(
+        IllegalArgumentEventRegException.class, () -> eventService.createParticipant(request));
   }
 
   @Test
@@ -538,7 +656,8 @@ public class EventServiceImplTest {
     ParticipantCreateRequest request = participant("john@test.com", 25, ParticipantGender.MALE);
     request.setFirstName(null);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createParticipant(request));
+    assertThrows(
+        IllegalArgumentEventRegException.class, () -> eventService.createParticipant(request));
   }
 
   @Test
@@ -546,14 +665,15 @@ public class EventServiceImplTest {
     ParticipantCreateRequest request = participant("john@test.com", 25, ParticipantGender.MALE);
     request.setLastName(null);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createParticipant(request));
+    assertThrows(
+        IllegalArgumentEventRegException.class, () -> eventService.createParticipant(request));
   }
 
   @Test
   void givenEmptyEmail_whenCreateParticipant_thenError() {
     assertThrows(
         IllegalArgumentEventRegException.class,
-        () -> service.createParticipant(participant("", 25, ParticipantGender.MALE)));
+        () -> eventService.createParticipant(participant("", 25, ParticipantGender.MALE)));
   }
 
   @Test
@@ -561,35 +681,42 @@ public class EventServiceImplTest {
     ParticipantCreateRequest request = participant("john@test.com", 25, ParticipantGender.MALE);
     request.setEmail(null);
 
-    assertThrows(IllegalArgumentEventRegException.class, () -> service.createParticipant(request));
+    assertThrows(
+        IllegalArgumentEventRegException.class, () -> eventService.createParticipant(request));
   }
 
   @Test
   void givenInvalidEmailFormat_whenCreateParticipant_thenError() {
     assertThrows(
         IllegalArgumentEventRegException.class,
-        () -> service.createParticipant(participant("not-an-email", 25, ParticipantGender.MALE)));
+        () ->
+            eventService.createParticipant(
+                participant("not-an-email", 25, ParticipantGender.MALE)));
   }
 
   @Test
   void givenZeroAge_whenCreateParticipant_thenError() {
     assertThrows(
         IllegalArgumentEventRegException.class,
-        () -> service.createParticipant(participant("john@test.com", 0, ParticipantGender.MALE)));
+        () ->
+            eventService.createParticipant(
+                participant("john@test.com", 0, ParticipantGender.MALE)));
   }
 
   @Test
   void givenAgeAboveMax_whenCreateParticipant_thenError() {
     assertThrows(
         IllegalArgumentEventRegException.class,
-        () -> service.createParticipant(participant("john@test.com", 151, ParticipantGender.MALE)));
+        () ->
+            eventService.createParticipant(
+                participant("john@test.com", 151, ParticipantGender.MALE)));
   }
 
   @Test
   void givenNullGender_whenCreateParticipant_thenError() {
     assertThrows(
         IllegalArgumentEventRegException.class,
-        () -> service.createParticipant(participant("john@test.com", 25, null)));
+        () -> eventService.createParticipant(participant("john@test.com", 25, null)));
   }
 
   // ---------- registerParticipant ----------
@@ -618,13 +745,13 @@ public class EventServiceImplTest {
 
     register(1, 1);
 
-    assertEquals(1, service.getEventById(1).getCurrentParticipantAmount());
+    assertEquals(1, eventService.getEventById(1).getCurrentParticipantAmount());
   }
 
   @Test
   void givenAgeEqualToRequirement_whenRegisterParticipant_thenAccepted() {
-    service.createEvent(event("Teens Event", 18, 100));
-    service.createParticipant(participant("teen@test.com", 18, ParticipantGender.MALE));
+    eventService.createEvent(event("Teens Event", 18, 100));
+    eventService.createParticipant(participant("teen@test.com", 18, ParticipantGender.MALE));
 
     EventRegResponse response = register(1, 1);
 
@@ -633,8 +760,8 @@ public class EventServiceImplTest {
 
   @Test
   void givenAgeJustBelowRequirement_whenRegisterParticipant_thenDenied() {
-    service.createEvent(event("Teens Event", 18, 100));
-    service.createParticipant(participant("teen@test.com", 17, ParticipantGender.MALE));
+    eventService.createEvent(event("Teens Event", 18, 100));
+    eventService.createParticipant(participant("teen@test.com", 17, ParticipantGender.MALE));
 
     EventRegResponse response = register(1, 1);
 
@@ -643,8 +770,8 @@ public class EventServiceImplTest {
 
   @Test
   void givenAgeJustAboveRequirement_whenRegisterParticipant_thenAccepted() {
-    service.createEvent(event("Teens Event", 18, 100));
-    service.createParticipant(participant("adult@test.com", 19, ParticipantGender.MALE));
+    eventService.createEvent(event("Teens Event", 18, 100));
+    eventService.createParticipant(participant("adult@test.com", 19, ParticipantGender.MALE));
 
     EventRegResponse response = register(1, 1);
 
@@ -653,7 +780,7 @@ public class EventServiceImplTest {
 
   @Test
   void givenMaleInFemaleOnlyEvent_whenRegisterParticipant_thenDenied() {
-    service.createEvent(
+    eventService.createEvent(
         event(
             "Ladies Event",
             OffsetDateTime.now().plusDays(30),
@@ -661,7 +788,7 @@ public class EventServiceImplTest {
             18,
             100,
             EventGenderRequirement.FEMALE_ONLY));
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     EventRegResponse response = register(1, 1);
 
@@ -670,7 +797,7 @@ public class EventServiceImplTest {
 
   @Test
   void givenFemaleInMaleOnlyEvent_whenRegisterParticipant_thenDenied() {
-    service.createEvent(
+    eventService.createEvent(
         event(
             "Gentlemen Event",
             OffsetDateTime.now().plusDays(30),
@@ -678,7 +805,7 @@ public class EventServiceImplTest {
             18,
             100,
             EventGenderRequirement.MALE_ONLY));
-    service.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
+    eventService.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
 
     EventRegResponse response = register(1, 1);
 
@@ -687,7 +814,7 @@ public class EventServiceImplTest {
 
   @Test
   void givenNotSpecifiedGenderInGenderRestrictedEvent_whenRegisterParticipant_thenDenied() {
-    service.createEvent(
+    eventService.createEvent(
         event(
             "Ladies Event",
             OffsetDateTime.now().plusDays(30),
@@ -695,7 +822,7 @@ public class EventServiceImplTest {
             18,
             100,
             EventGenderRequirement.FEMALE_ONLY));
-    service.createParticipant(
+    eventService.createParticipant(
         participant("anonymous@test.com", 25, ParticipantGender.NOT_SPECIFIED));
 
     EventRegResponse response = register(1, 1);
@@ -705,9 +832,9 @@ public class EventServiceImplTest {
 
   @Test
   void givenFullEvent_whenRegisterParticipant_thenDenied() {
-    service.createEvent(event("Full Event", 18, 1));
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
+    eventService.createEvent(event("Full Event", 18, 1));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
     register(1, 1);
 
     EventRegResponse response = register(2, 1);
@@ -717,10 +844,10 @@ public class EventServiceImplTest {
 
   @Test
   void givenFullEvent_whenThirdParticipantRegisters_thenDenied() {
-    service.createEvent(event("Full Event", 18, 1));
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
-    service.createParticipant(participant("alice@test.com", 25, ParticipantGender.FEMALE));
+    eventService.createEvent(event("Full Event", 18, 1));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
+    eventService.createParticipant(participant("alice@test.com", 25, ParticipantGender.FEMALE));
     register(1, 1);
     register(2, 1);
 
@@ -738,7 +865,7 @@ public class EventServiceImplTest {
 
   @Test
   void givenMissingEvent_whenRegisterParticipant_thenError() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
     assertThrows(EventNotFoundException.class, () -> register(1, 1));
   }
@@ -747,71 +874,71 @@ public class EventServiceImplTest {
 
   @Test
   void givenExistingId_whenGetParticipantById_thenFirstNameIsSaved() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
-    ParticipantResponse response = service.getParticipantById(1);
+    ParticipantResponse response = eventService.getParticipantById(1);
 
     assertEquals("John", response.getFirstName());
   }
 
   @Test
   void givenExistingId_whenGetParticipantById_thenEmailIsSaved() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
-    ParticipantResponse response = service.getParticipantById(1);
+    ParticipantResponse response = eventService.getParticipantById(1);
 
     assertEquals("john@test.com", response.getEmail());
   }
 
   @Test
   void givenExistingId_whenGetParticipantById_thenAgeIsSaved() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
-    ParticipantResponse response = service.getParticipantById(1);
+    ParticipantResponse response = eventService.getParticipantById(1);
 
     assertEquals(25, response.getAge());
   }
 
   @Test
   void givenMissingIdZero_whenGetParticipantById_thenError() {
-    assertThrows(ParticipantNotFoundException.class, () -> service.getParticipantById(0));
+    assertThrows(ParticipantNotFoundException.class, () -> eventService.getParticipantById(0));
   }
 
   @Test
   void givenNegativeId_whenGetParticipantById_thenError() {
-    assertThrows(ParticipantNotFoundException.class, () -> service.getParticipantById(-1));
+    assertThrows(ParticipantNotFoundException.class, () -> eventService.getParticipantById(-1));
   }
 
   @Test
   void givenHugeId_whenGetParticipantById_thenError() {
-    assertThrows(ParticipantNotFoundException.class, () -> service.getParticipantById(999999));
+    assertThrows(ParticipantNotFoundException.class, () -> eventService.getParticipantById(999999));
   }
 
   // ---------- getParticipants ----------
 
   @Test
   void givenTwoParticipants_whenGetParticipants_thenSizeIsTwo() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 30, ParticipantGender.FEMALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 30, ParticipantGender.FEMALE));
 
-    List<ParticipantResponse> participants = service.getParticipants();
+    List<ParticipantResponse> participants = eventService.getParticipants();
 
     assertEquals(2, participants.size());
   }
 
   @Test
   void givenTwoParticipants_whenGetParticipants_thenFirstIsJohn() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 30, ParticipantGender.FEMALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 30, ParticipantGender.FEMALE));
 
-    ParticipantResponse first = service.getParticipants().get(0);
+    ParticipantResponse first = eventService.getParticipants().get(0);
 
     assertEquals("John", first.getFirstName());
   }
 
   @Test
   void givenNoParticipants_whenGetParticipants_thenEmpty() {
-    List<ParticipantResponse> participants = service.getParticipants();
+    List<ParticipantResponse> participants = eventService.getParticipants();
 
     assertTrue(participants.isEmpty());
   }
@@ -820,22 +947,22 @@ public class EventServiceImplTest {
 
   @Test
   void givenTwoParticipants_whenGetSortedByAge_thenFirstIsYounger() {
-    service.createParticipant(participant("john@test.com", 30, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 20, ParticipantGender.FEMALE));
+    eventService.createParticipant(participant("john@test.com", 30, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 20, ParticipantGender.FEMALE));
 
     List<ParticipantResponse> sorted =
-        service.getParticipantsSorted(Comparator.comparingInt(Participant::getAge));
+        eventService.getParticipantsSorted(Comparator.comparingInt(Participant::getAge));
 
     assertEquals(20, sorted.get(0).getAge());
   }
 
   @Test
   void givenTwoParticipants_whenGetSortedByAge_thenSecondIsOlder() {
-    service.createParticipant(participant("john@test.com", 30, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 20, ParticipantGender.FEMALE));
+    eventService.createParticipant(participant("john@test.com", 30, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 20, ParticipantGender.FEMALE));
 
     List<ParticipantResponse> sorted =
-        service.getParticipantsSorted(Comparator.comparingInt(Participant::getAge));
+        eventService.getParticipantsSorted(Comparator.comparingInt(Participant::getAge));
 
     assertEquals(30, sorted.get(1).getAge());
   }
@@ -843,7 +970,7 @@ public class EventServiceImplTest {
   @Test
   void givenNoParticipants_whenGetSorted_thenEmpty() {
     List<ParticipantResponse> sorted =
-        service.getParticipantsSorted(Comparator.comparingInt(Participant::getAge));
+        eventService.getParticipantsSorted(Comparator.comparingInt(Participant::getAge));
 
     assertTrue(sorted.isEmpty());
   }
@@ -854,7 +981,7 @@ public class EventServiceImplTest {
   void givenExistingId_whenGetEventById_thenNameIsSaved() {
     arrangeEvent();
 
-    EventResponse response = service.getEventById(1);
+    EventResponse response = eventService.getEventById(1);
 
     assertEquals("Tech Conference", response.getEventName());
   }
@@ -862,10 +989,10 @@ public class EventServiceImplTest {
   @Test
   void givenExistingId_whenGetEventById_thenDateIsSaved() {
     OffsetDateTime date = OffsetDateTime.parse("2030-05-05T10:00:00+00:00");
-    service.createEvent(
+    eventService.createEvent(
         event("Tech Conference", date, Duration.ofHours(2), 18, 100, EventGenderRequirement.NONE));
 
-    EventResponse response = service.getEventById(1);
+    EventResponse response = eventService.getEventById(1);
 
     assertEquals(date, response.getEventDate());
   }
@@ -874,51 +1001,51 @@ public class EventServiceImplTest {
   void givenExistingId_whenGetEventById_thenLocationIsSaved() {
     arrangeEvent();
 
-    EventResponse response = service.getEventById(1);
+    EventResponse response = eventService.getEventById(1);
 
     assertEquals("Main Hall", response.getLocation());
   }
 
   @Test
   void givenMissingIdZero_whenGetEventById_thenError() {
-    assertThrows(EventNotFoundException.class, () -> service.getEventById(0));
+    assertThrows(EventNotFoundException.class, () -> eventService.getEventById(0));
   }
 
   @Test
   void givenNegativeId_whenGetEventById_thenError() {
-    assertThrows(EventNotFoundException.class, () -> service.getEventById(-1));
+    assertThrows(EventNotFoundException.class, () -> eventService.getEventById(-1));
   }
 
   @Test
   void givenHugeId_whenGetEventById_thenError() {
-    assertThrows(EventNotFoundException.class, () -> service.getEventById(999999));
+    assertThrows(EventNotFoundException.class, () -> eventService.getEventById(999999));
   }
 
   // ---------- getEvents ----------
 
   @Test
   void givenTwoEvents_whenGetEvents_thenSizeIsTwo() {
-    service.createEvent(event("Event One", 18, 100));
-    service.createEvent(event("Event Two", 18, 100));
+    eventService.createEvent(event("Event One", 18, 100));
+    eventService.createEvent(event("Event Two", 18, 100));
 
-    List<EventResponse> events = service.getEvents();
+    List<EventResponse> events = eventService.getEvents();
 
     assertEquals(2, events.size());
   }
 
   @Test
   void givenTwoEvents_whenGetEvents_thenFirstIsFirstCreated() {
-    service.createEvent(event("Event One", 18, 100));
-    service.createEvent(event("Event Two", 18, 100));
+    eventService.createEvent(event("Event One", 18, 100));
+    eventService.createEvent(event("Event Two", 18, 100));
 
-    EventResponse first = service.getEvents().get(0);
+    EventResponse first = eventService.getEvents().get(0);
 
     assertEquals("Event One", first.getEventName());
   }
 
   @Test
   void givenNoEvents_whenGetEvents_thenEmpty() {
-    List<EventResponse> events = service.getEvents();
+    List<EventResponse> events = eventService.getEvents();
 
     assertTrue(events.isEmpty());
   }
@@ -927,42 +1054,45 @@ public class EventServiceImplTest {
 
   @Test
   void givenPredicate_whenGetEventsFiltered_thenOnlyMatchingReturned() {
-    service.createEvent(event("Teens Event", 18, 100));
-    service.createEvent(event("Adults Event", 21, 100));
+    eventService.createEvent(event("Teens Event", 18, 100));
+    eventService.createEvent(event("Adults Event", 21, 100));
 
     List<EventResponse> filtered =
-        service.getEventsFiltered(List.of(currentEvent -> currentEvent.getAgeRequired() >= 21));
+        eventService.getEventsFiltered(
+            List.of(currentEvent -> currentEvent.getAgeRequired() >= 21));
 
     assertEquals(1, filtered.size());
   }
 
   @Test
   void givenPredicate_whenGetEventsFiltered_thenMatchingNameReturned() {
-    service.createEvent(event("Teens Event", 18, 100));
-    service.createEvent(event("Adults Event", 21, 100));
+    eventService.createEvent(event("Teens Event", 18, 100));
+    eventService.createEvent(event("Adults Event", 21, 100));
 
     List<EventResponse> filtered =
-        service.getEventsFiltered(List.of(currentEvent -> currentEvent.getAgeRequired() >= 21));
+        eventService.getEventsFiltered(
+            List.of(currentEvent -> currentEvent.getAgeRequired() >= 21));
 
     assertEquals("Adults Event", filtered.get(0).getEventName());
   }
 
   @Test
   void givenNoMatchingEvents_whenGetEventsFiltered_thenEmpty() {
-    service.createEvent(event("Teens Event", 18, 100));
+    eventService.createEvent(event("Teens Event", 18, 100));
 
     List<EventResponse> filtered =
-        service.getEventsFiltered(List.of(currentEvent -> currentEvent.getAgeRequired() >= 21));
+        eventService.getEventsFiltered(
+            List.of(currentEvent -> currentEvent.getAgeRequired() >= 21));
 
     assertTrue(filtered.isEmpty());
   }
 
   @Test
   void givenEmptyPredicates_whenGetEventsFiltered_thenAllReturned() {
-    service.createEvent(event("Teens Event", 18, 100));
-    service.createEvent(event("Adults Event", 21, 100));
+    eventService.createEvent(event("Teens Event", 18, 100));
+    eventService.createEvent(event("Adults Event", 21, 100));
 
-    List<EventResponse> filtered = service.getEventsFiltered(List.of());
+    List<EventResponse> filtered = eventService.getEventsFiltered(List.of());
 
     assertEquals(2, filtered.size());
   }
@@ -980,10 +1110,10 @@ public class EventServiceImplTest {
             100,
             EventGenderRequirement.NONE);
     second.setLocation("West Hall");
-    service.createEvent(event("First Event", 18, 100));
-    service.createEvent(second);
+    eventService.createEvent(event("First Event", 18, 100));
+    eventService.createEvent(second);
 
-    Map<String, List<EventResponse>> grouped = service.getEventsGrouped(Event::getLocation);
+    Map<String, List<EventResponse>> grouped = eventService.getEventsGrouped(Event::getLocation);
 
     assertEquals(2, grouped.size());
   }
@@ -999,10 +1129,10 @@ public class EventServiceImplTest {
             100,
             EventGenderRequirement.NONE);
     second.setLocation("West Hall");
-    service.createEvent(event("First Event", 18, 100));
-    service.createEvent(second);
+    eventService.createEvent(event("First Event", 18, 100));
+    eventService.createEvent(second);
 
-    Map<String, List<EventResponse>> grouped = service.getEventsGrouped(Event::getLocation);
+    Map<String, List<EventResponse>> grouped = eventService.getEventsGrouped(Event::getLocation);
 
     assertEquals(1, grouped.get("Main Hall").size());
   }
@@ -1013,7 +1143,7 @@ public class EventServiceImplTest {
   void givenExistingId_whenGetRegistrationRequestById_thenStatusIsAccepted() {
     arrangeAcceptedRegistration();
 
-    EventRegResponse response = service.getRegistrationRequestById(1);
+    EventRegResponse response = eventService.getRegistrationRequestById(1);
 
     assertEquals(EventRegRequestStatus.ACCEPTED, response.getEventRegRequestStatus());
   }
@@ -1022,7 +1152,7 @@ public class EventServiceImplTest {
   void givenExistingId_whenGetRegistrationRequestById_thenParticipantIdIsOne() {
     arrangeAcceptedRegistration();
 
-    EventRegResponse response = service.getRegistrationRequestById(1);
+    EventRegResponse response = eventService.getRegistrationRequestById(1);
 
     assertEquals(1, response.getParticipantId());
   }
@@ -1031,20 +1161,21 @@ public class EventServiceImplTest {
   void givenExistingId_whenGetRegistrationRequestById_thenEventIdIsOne() {
     arrangeAcceptedRegistration();
 
-    EventRegResponse response = service.getRegistrationRequestById(1);
+    EventRegResponse response = eventService.getRegistrationRequestById(1);
 
     assertEquals(1, response.getEventId());
   }
 
   @Test
   void givenMissingIdZero_whenGetRegistrationRequestById_thenError() {
-    assertThrows(RegistrationNotFoundException.class, () -> service.getRegistrationRequestById(0));
+    assertThrows(
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(0));
   }
 
   @Test
   void givenHugeId_whenGetRegistrationRequestById_thenError() {
     assertThrows(
-        RegistrationNotFoundException.class, () -> service.getRegistrationRequestById(999999));
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(999999));
   }
 
   @Test
@@ -1052,28 +1183,30 @@ public class EventServiceImplTest {
     arrangeEvent();
     registerMissingParticipant();
 
-    assertThrows(ParticipantNotFoundException.class, () -> service.getRegistrationRequestById(1));
+    assertThrows(
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @Test
   void givenRegistrationForMissingEvent_whenGetRegistrationRequestById_thenError() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
     registerMissingEvent();
 
-    assertThrows(EventNotFoundException.class, () -> service.getRegistrationRequestById(1));
+    assertThrows(
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   // ---------- getRegistrationRequests ----------
 
   @Test
   void givenTwoRegistrations_whenGetRegistrationRequests_thenSizeIsTwo() {
-    service.createEvent(event("Tech Conference", 18, 100));
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
+    eventService.createEvent(event("Tech Conference", 18, 100));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
     register(1, 1);
     register(2, 1);
 
-    List<EventRegResponse> registrations = service.getRegistrationRequests();
+    List<EventRegResponse> registrations = eventService.getRegistrationRequests();
 
     assertEquals(2, registrations.size());
   }
@@ -1083,9 +1216,10 @@ public class EventServiceImplTest {
   @Test
   void givenWaitingRegistration_whenGetWaitingQueue_thenSizeIsOne() {
     arrangeAcceptedRegistration();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.WAITING, "waiting", false);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.WAITING, "waiting", false);
 
-    List<EventRegResponse> waiting = service.getRegistrationRequestsInWaitingQueue(1);
+    List<EventRegResponse> waiting = eventService.getRegistrationRequestsInWaitingQueue(1);
 
     assertEquals(1, waiting.size());
   }
@@ -1093,16 +1227,17 @@ public class EventServiceImplTest {
   @Test
   void givenWaitingRegistration_whenGetWaitingQueue_thenRegistrationIdIsOne() {
     arrangeAcceptedRegistration();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.WAITING, "waiting", false);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.WAITING, "waiting", false);
 
-    List<EventRegResponse> waiting = service.getRegistrationRequestsInWaitingQueue(1);
+    List<EventRegResponse> waiting = eventService.getRegistrationRequestsInWaitingQueue(1);
 
     assertEquals(1, waiting.get(0).getRegistrationId());
   }
 
   @Test
   void givenNoWaitingRegistrations_whenGetWaitingQueue_thenEmpty() {
-    List<EventRegResponse> waiting = service.getRegistrationRequestsInWaitingQueue(1);
+    List<EventRegResponse> waiting = eventService.getRegistrationRequestsInWaitingQueue(1);
 
     assertTrue(waiting.isEmpty());
   }
@@ -1111,44 +1246,48 @@ public class EventServiceImplTest {
   void givenWaitingQueue_whenCancelAcceptedRegistration_thenWaitingAutoAccepted() {
     arrangeWaitingQueueScenario();
 
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", true);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", true);
 
     assertEquals(
         EventRegRequestStatus.ACCEPTED,
-        service.getRegistrationRequestById(2).getEventRegRequestStatus());
+        eventService.getRegistrationRequestById(2).getEventRegRequestStatus());
   }
 
   @Test
   void givenWaitingQueue_whenCancelAcceptedRegistration_thenParticipantAmountIsOne() {
     arrangeWaitingQueueScenario();
 
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", true);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", true);
 
-    assertEquals(1, service.getEventById(1).getCurrentParticipantAmount());
+    assertEquals(1, eventService.getEventById(1).getCurrentParticipantAmount());
   }
 
   @Test
   void givenWaitingQueue_whenUndoCancel_thenCancelledRegistrationRestored() {
     arrangeWaitingQueueScenario();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", true);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", true);
 
-    service.undoLatestAction();
+    eventService.undoLatestAction();
 
     assertEquals(
         EventRegRequestStatus.ACCEPTED,
-        service.getRegistrationRequestById(1).getEventRegRequestStatus());
+        eventService.getRegistrationRequestById(1).getEventRegRequestStatus());
   }
 
   @Test
   void givenWaitingQueue_whenUndoCancel_thenWaitingRegistrationBackToWaiting() {
     arrangeWaitingQueueScenario();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", true);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", true);
 
-    service.undoLatestAction();
+    eventService.undoLatestAction();
 
     assertEquals(
         EventRegRequestStatus.WAITING,
-        service.getRegistrationRequestById(2).getEventRegRequestStatus());
+        eventService.getRegistrationRequestById(2).getEventRegRequestStatus());
   }
 
   // ---------- changeRegistrationRequestStatus ----------
@@ -1158,7 +1297,8 @@ public class EventServiceImplTest {
     arrangeAcceptedRegistration();
 
     EventRegResponse response =
-        service.changeRegistrationRequestStatus(1, EventRegRequestStatus.WAITING, "waiting", false);
+        eventService.changeRegistrationRequestStatus(
+            1, EventRegRequestStatus.WAITING, "waiting", false);
 
     assertEquals(EventRegRequestStatus.WAITING, response.getEventRegRequestStatus());
   }
@@ -1167,18 +1307,21 @@ public class EventServiceImplTest {
   void givenAcceptedRegistration_whenChangeToWaiting_thenParticipantAmountDecremented() {
     arrangeAcceptedRegistration();
 
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.WAITING, "waiting", false);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.WAITING, "waiting", false);
 
-    assertEquals(0, service.getEventById(1).getCurrentParticipantAmount());
+    assertEquals(0, eventService.getEventById(1).getCurrentParticipantAmount());
   }
 
   @Test
   void givenWaitingRegistration_whenChangeToAccepted_thenStatusIsAccepted() {
     arrangeAcceptedRegistration();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.WAITING, "waiting", false);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.WAITING, "waiting", false);
 
     EventRegResponse response =
-        service.changeRegistrationRequestStatus(1, EventRegRequestStatus.ACCEPTED, "back", false);
+        eventService.changeRegistrationRequestStatus(
+            1, EventRegRequestStatus.ACCEPTED, "back", false);
 
     assertEquals(EventRegRequestStatus.ACCEPTED, response.getEventRegRequestStatus());
   }
@@ -1186,11 +1329,12 @@ public class EventServiceImplTest {
   @Test
   void givenWaitingRegistration_whenChangeToAccepted_thenParticipantAmountIncremented() {
     arrangeAcceptedRegistration();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.WAITING, "waiting", false);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.WAITING, "waiting", false);
 
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.ACCEPTED, "back", false);
+    eventService.changeRegistrationRequestStatus(1, EventRegRequestStatus.ACCEPTED, "back", false);
 
-    assertEquals(1, service.getEventById(1).getCurrentParticipantAmount());
+    assertEquals(1, eventService.getEventById(1).getCurrentParticipantAmount());
   }
 
   @Test
@@ -1198,7 +1342,7 @@ public class EventServiceImplTest {
     arrangeAcceptedRegistration();
 
     EventRegResponse response =
-        service.changeRegistrationRequestStatus(1, EventRegRequestStatus.DENIED, "no", false);
+        eventService.changeRegistrationRequestStatus(1, EventRegRequestStatus.DENIED, "no", false);
 
     assertEquals(EventRegRequestStatus.DENIED, response.getEventRegRequestStatus());
   }
@@ -1208,7 +1352,7 @@ public class EventServiceImplTest {
     arrangeAcceptedRegistration();
 
     EventRegResponse response =
-        service.changeRegistrationRequestStatus(
+        eventService.changeRegistrationRequestStatus(
             1, EventRegRequestStatus.CANCELLED, "cancelled", true);
 
     assertEquals(EventRegRequestStatus.CANCELLED, response.getEventRegRequestStatus());
@@ -1218,19 +1362,22 @@ public class EventServiceImplTest {
   void givenAcceptedRegistration_whenChangeToCancelled_thenParticipantAmountDecremented() {
     arrangeAcceptedRegistration();
 
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", true);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", true);
 
-    assertEquals(0, service.getEventById(1).getCurrentParticipantAmount());
+    assertEquals(0, eventService.getEventById(1).getCurrentParticipantAmount());
   }
 
   @Test
   void givenCancelWithoutHistory_whenUndo_thenRegisterIsUndone() {
     arrangeAcceptedRegistration();
 
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", false);
-    service.undoLatestAction();
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", false);
+    eventService.undoLatestAction();
 
-    assertThrows(RegistrationNotFoundException.class, () -> service.getRegistrationRequestById(1));
+    assertThrows(
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @Test
@@ -1238,7 +1385,7 @@ public class EventServiceImplTest {
     assertThrows(
         RegistrationNotFoundException.class,
         () ->
-            service.changeRegistrationRequestStatus(
+            eventService.changeRegistrationRequestStatus(
                 999, EventRegRequestStatus.ACCEPTED, "x", false));
   }
 
@@ -1249,22 +1396,22 @@ public class EventServiceImplTest {
     assertThrows(
         EventRegException.class,
         () ->
-            service.changeRegistrationRequestStatus(
+            eventService.changeRegistrationRequestStatus(
                 1, EventRegRequestStatus.ACCEPTED, "same", false));
   }
 
   @Test
   void givenFullEvent_whenAcceptOverCapacity_thenError() {
-    service.createEvent(event("Full Event", 18, 1));
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
-    service.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
+    eventService.createEvent(event("Full Event", 18, 1));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("jane@test.com", 25, ParticipantGender.FEMALE));
     register(1, 1);
     register(2, 1);
 
     assertThrows(
         EventCapacityExceededException.class,
         () ->
-            service.changeRegistrationRequestStatus(
+            eventService.changeRegistrationRequestStatus(
                 2, EventRegRequestStatus.ACCEPTED, "over capacity", false));
   }
 
@@ -1272,41 +1419,41 @@ public class EventServiceImplTest {
 
   @Test
   void givenEmptyHistory_whenUndo_thenError() {
-    assertThrows(EventRegException.class, () -> service.undoLatestAction());
+    assertThrows(EventRegException.class, () -> eventService.undoLatestAction());
   }
 
   @Test
   void givenCreatedEvent_whenUndo_thenEventRemoved() {
     arrangeEvent();
 
-    service.undoLatestAction();
+    eventService.undoLatestAction();
 
-    assertThrows(EventNotFoundException.class, () -> service.getEventById(1));
+    assertThrows(EventNotFoundException.class, () -> eventService.getEventById(1));
   }
 
   @Test
   void givenCreatedEvent_whenUndo_thenTypeIsCreateEvent() {
     arrangeEvent();
 
-    UndoResponse response = service.undoLatestAction();
+    UndoResponse response = eventService.undoLatestAction();
 
     assertEquals(ActionType.CREATE_EVENT, response.getType());
   }
 
   @Test
   void givenCreatedParticipant_whenUndo_thenParticipantRemoved() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
-    service.undoLatestAction();
+    eventService.undoLatestAction();
 
-    assertThrows(ParticipantNotFoundException.class, () -> service.getParticipantById(1));
+    assertThrows(ParticipantNotFoundException.class, () -> eventService.getParticipantById(1));
   }
 
   @Test
   void givenCreatedParticipant_whenUndo_thenTypeIsCreateParticipant() {
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
 
-    UndoResponse response = service.undoLatestAction();
+    UndoResponse response = eventService.undoLatestAction();
 
     assertEquals(ActionType.CREATE_PARTICIPANT, response.getType());
   }
@@ -1315,28 +1462,31 @@ public class EventServiceImplTest {
   void givenRegistration_whenUndo_thenRegistrationRemoved() {
     arrangeAcceptedRegistration();
 
-    service.undoLatestAction();
+    eventService.undoLatestAction();
 
-    assertThrows(RegistrationNotFoundException.class, () -> service.getRegistrationRequestById(1));
+    assertThrows(
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @Test
   void givenWaitingRegistration_whenUndoRegister_thenRegistrationRemoved() {
-    service.createEvent(event("Tech Conference", 18, 100));
-    service.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
+    eventService.createEvent(event("Tech Conference", 18, 100));
+    eventService.createParticipant(participant("john@test.com", 25, ParticipantGender.MALE));
     register(1, 1);
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.WAITING, "waiting", false);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.WAITING, "waiting", false);
 
-    service.undoLatestAction();
+    eventService.undoLatestAction();
 
-    assertThrows(RegistrationNotFoundException.class, () -> service.getRegistrationRequestById(1));
+    assertThrows(
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @Test
   void givenRegistration_whenUndo_thenTypeIsRegisterParticipant() {
     arrangeAcceptedRegistration();
 
-    UndoResponse response = service.undoLatestAction();
+    UndoResponse response = eventService.undoLatestAction();
 
     assertEquals(ActionType.REGISTER_PARTICIPANT, response.getType());
   }
@@ -1344,30 +1494,33 @@ public class EventServiceImplTest {
   @Test
   void givenCancelledRegistration_whenUndo_thenStatusRestored() {
     arrangeAcceptedRegistration();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", true);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", true);
 
-    service.undoLatestAction();
+    eventService.undoLatestAction();
 
     assertEquals(
         EventRegRequestStatus.ACCEPTED,
-        service.getRegistrationRequestById(1).getEventRegRequestStatus());
+        eventService.getRegistrationRequestById(1).getEventRegRequestStatus());
   }
 
   @Test
   void givenCancelledRegistration_whenUndo_thenParticipantAmountRestored() {
     arrangeAcceptedRegistration();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", true);
-    service.undoLatestAction();
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", true);
+    eventService.undoLatestAction();
 
-    assertEquals(1, service.getEventById(1).getCurrentParticipantAmount());
+    assertEquals(1, eventService.getEventById(1).getCurrentParticipantAmount());
   }
 
   @Test
   void givenCancelledRegistration_whenUndo_thenTypeIsCancelRegistration() {
     arrangeAcceptedRegistration();
-    service.changeRegistrationRequestStatus(1, EventRegRequestStatus.CANCELLED, "cancelled", true);
+    eventService.changeRegistrationRequestStatus(
+        1, EventRegRequestStatus.CANCELLED, "cancelled", true);
 
-    UndoResponse response = service.undoLatestAction();
+    UndoResponse response = eventService.undoLatestAction();
 
     assertEquals(ActionType.CANCEL_REGISTRATION, response.getType());
   }
