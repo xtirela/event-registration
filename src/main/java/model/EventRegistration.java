@@ -1,5 +1,6 @@
 package model;
 
+import java.time.OffsetDateTime;
 import lombok.Builder;
 import lombok.Data;
 import model.enums.EventRegRequestStatus;
@@ -15,4 +16,5 @@ public class EventRegistration {
 
   private EventRegRequestStatus eventRegRequestStatus;
   @Builder.Default private String description = "none";
+  private OffsetDateTime createdAt;
 }
