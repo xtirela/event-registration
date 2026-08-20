@@ -6,36 +6,113 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.OutputStreamAppender;
 import exception.EventNotFoundException;
 import exception.ParticipantNotFoundException;
 import exception.RegistrationNotFoundException;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.Scanner;
 import java.util.stream.Stream;
+import liquibase.Liquibase;
+import liquibase.database.Database;
+import liquibase.database.DatabaseFactory;
+import liquibase.database.jvm.JdbcConnection;
+import liquibase.resource.ClassLoaderResourceAccessor;
 import model.enums.EventRegRequestStatus;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.LoggerFactory;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import repository.EventRegistrationRepository;
+import repository.EventRepository;
+import repository.ParticipantRepository;
+import repository.implementation.Jdbc.EventRegistrationRepositoryJdbc;
+import repository.implementation.Jdbc.EventRepositoryJdbc;
+import repository.implementation.Jdbc.ParticipantRepositoryJdbc;
 import service.EventService;
 import service.implementation.EventServiceImpl;
 
 /** Integration tests for {@link ConsoleView} menu actions. */
+@Testcontainers
 public class ConsoleViewTest {
 
   private EventService eventService;
   private ConsoleView consoleView;
 
+  private static Connection connection;
+
+  @Container
+  private static final PostgreSQLContainer<?> postgres =
+      new PostgreSQLContainer<>("postgres:18")
+          .withDatabaseName("test_db")
+          .withUsername("test")
+          .withPassword("test");
+
+  @BeforeAll
+  static void setUpDatabase() throws SQLException {
+    System.setProperty("db.url", postgres.getJdbcUrl());
+    System.setProperty("db.user", postgres.getUsername());
+    System.setProperty("db.password", postgres.getPassword());
+
+    connection =
+        DriverManager.getConnection(
+            postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+
+    runMigrations(connection);
+  }
+
   @BeforeEach
-  void setUp() {
-    eventService = new EventServiceImpl();
+  void setUp() throws SQLException {
+
+    cleanDatabase(connection);
+
+    ParticipantRepository participantRepo = new ParticipantRepositoryJdbc();
+    EventRepository eventRepo = new EventRepositoryJdbc();
+    EventRegistrationRepository regRepo = new EventRegistrationRepositoryJdbc();
+
+    eventService = new EventServiceImpl(eventRepo, participantRepo, regRepo);
+
     consoleView = new ConsoleView(eventService);
   }
 
   // ---------- helpers ----------
+
+  private static void runMigrations(Connection connection) {
+    try {
+      Database database =
+          DatabaseFactory.getInstance()
+              .findCorrectDatabaseImplementation(new JdbcConnection(connection));
+
+      Liquibase liquibase =
+          new Liquibase(
+              "db/changelog/db.changelog-master.yaml", new ClassLoaderResourceAccessor(), database);
+      liquibase.update("");
+      connection.setAutoCommit(true);
+    } catch (Exception e) {
+      throw new RuntimeException("Ошибка миграций", e);
+    }
+  }
+
+  private static void cleanDatabase(Connection connection) throws SQLException {
+    connection.setAutoCommit(true);
+    try (var statement = connection.createStatement()) {
+      statement.execute("TRUNCATE event_registration, event, participant RESTART IDENTITY CASCADE");
+    }
+  }
 
   void performConsoleAction(int action, String input) {
     System.setIn(new ByteArrayInputStream((input + "\n").getBytes()));
@@ -46,13 +123,24 @@ public class ConsoleViewTest {
   }
 
   String captureOutput(Runnable action) {
+    LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+    PatternLayoutEncoder encoder = new PatternLayoutEncoder();
+    encoder.setContext(context);
+    encoder.setPattern("%msg%n");
+    encoder.start();
     ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-    PrintStream original = System.out;
-    System.setOut(new PrintStream(buffer));
+    OutputStreamAppender<ILoggingEvent> appender = new OutputStreamAppender<>();
+    appender.setContext(context);
+    appender.setEncoder(encoder);
+    appender.setOutputStream(buffer);
+    appender.start();
+    Logger root = context.getLogger(Logger.ROOT_LOGGER_NAME);
+    root.addAppender(appender);
     try {
       action.run();
     } finally {
-      System.setOut(original);
+      root.detachAppender(appender);
+      appender.stop();
     }
     return buffer.toString();
   }
@@ -308,7 +396,7 @@ public class ConsoleViewTest {
     performConsoleAction(3, regInput);
 
     assertThrows(
-        ParticipantNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @ParameterizedTest
@@ -320,7 +408,8 @@ public class ConsoleViewTest {
 
     performConsoleAction(3, regInput);
 
-    assertThrows(EventNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
+    assertThrows(
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @Test
@@ -406,7 +495,7 @@ public class ConsoleViewTest {
     performConsoleAction(4, cancelInput);
 
     assertThrows(
-        ParticipantNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
+        RegistrationNotFoundException.class, () -> eventService.getRegistrationRequestById(1));
   }
 
   @ParameterizedTest
