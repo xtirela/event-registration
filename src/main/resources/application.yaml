@@ -1,0 +1,35 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/eventreg_db
+    password: postgres
+    username: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    enabled: true
+
+  mail:
+    host: localhost
+    port: 1025
+
+dadata:
+  client:
+    token: ${DADATA_TOKEN}
+
+management:
+  health:
+    mail:
+      enabled: false
+
+security:
+  secret-key: ${SECRET_KEY:"a1ztrtzvb697fMwxDHBHlaOW89tBAP4rCSmr5PmfS5r"}

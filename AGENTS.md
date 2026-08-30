@@ -7,10 +7,10 @@ roadmap java_roadmap пройден до «Модуля 3» (Docker, GHCR, SLF4J
 
 ## Команды
 - Сборка / тесты:            `./gradlew build`, `./gradlew test`
-- Один тест:                 `./gradlew test --tests "service.EventServiceImplTest"`
+- Один тест:                 `./gradlew test --tests "com.eventreg.service.EventServiceImplTest"`
 - Стиль:                     `./gradlew checkstyleMain checkstyleTest`
 - Формат (авто):             `./gradlew spotlessApply`   (Spotless googleJavaFormat)
-- Запуск меню (локально):    `./gradlew run`   (mainClass = view.Main; standardInput = System.in)
+- Запуск меню (локально):    `./gradlew run`   (mainClass = com.eventreg.PartyApplication; standardInput = System.in)
 
 ## Docker
 - Собрать: `docker compose build`; поднять: `docker compose up -d`.
@@ -23,7 +23,7 @@ roadmap java_roadmap пройден до «Модуля 3» (Docker, GHCR, SLF4J
   логин через `secrets.GITHUB_TOKEN`, packages: write).
 
 ## Архитектура (состояние «Модуль 3» — цель «Модуля 4»)
-- Слои: view (ConsoleView, Main) → service (EventService / EventServiceImpl) → repository (интерфейсы
+- Слои: view (ConsoleView, com.eventreg.PartyApplication) → service (EventService / EventServiceImpl) → repository (интерфейсы
   + impl). Хранилище пока in-memory: `SimpleHashMap`/`SimpleLinkedList`/`SimpleArrayList` из пакета
   `collection` (свои реализации стандартных коллекций).
 - 3 доменные сущности: `Event`, `Participant`, `EventRegistration` (+ enum-статусы в `model.enums`).
