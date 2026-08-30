@@ -1,17 +1,19 @@
 package com.eventreg.model;
 
-import java.time.OffsetDateTime;
-
+import com.eventreg.model.enums.EventRegistrationStatus;
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import com.eventreg.model.enums.EventRegRequestStatus;
-import lombok.NoArgsConstructor;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import java.time.OffsetDateTime;
+import lombok.*;
 
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name="event_registrations")
+@Table(name = "event_registrations")
 @Entity
 public class EventRegistration {
 
@@ -19,17 +21,38 @@ public class EventRegistration {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
-  private EventRegRequestStatus eventRegRequestStatus;
+  @NotNull(message = "Registration status is required")
+  @Builder.Default
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false)
+  private EventRegistrationStatus eventRegistrationStatus = EventRegistrationStatus.PENDING;
 
-  @Builder.Default private String description = "none";
+  @Size(max = 500, message = "Description too long")
+  @Builder.Default
+  private String description = "none";
 
-  @ManyToOne
-  @JoinColumn(name = "event_id")
+  @JsonBackReference
+  @NotNull(message = "Event is required")
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "event_id", nullable = false)
   private Event event;
 
-  @ManyToOne
-  @JoinColumn(name = "participant_id")
+  @NotNull(message = "Participant is required")
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "participant_id", nullable = false)
   private Participant participant;
 
   private OffsetDateTime createdAt;
+  private OffsetDateTime updatedAt;
+
+  @PrePersist
+  void onSave() {
+    createdAt = OffsetDateTime.now();
+    updatedAt = OffsetDateTime.now();
+  }
+
+  @PostUpdate
+  void onUpdate() {
+    updatedAt = OffsetDateTime.now();
+  }
 }

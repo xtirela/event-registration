@@ -1,32 +1,23 @@
 package com.eventreg.repository;
 
-import com.eventreg.dto.response.EventSummaryResponse;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
 import com.eventreg.model.Event;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
-public interface EventRepository extends JpaRepository<Event, Long>, JpaSpecificationExecutor<Event>
-{
-  Event save(Event event);
+public interface EventRepository
+    extends JpaRepository<Event, Long>, JpaSpecificationExecutor<Event> {
 
-  Event update(Event event);
+  @Query(
+      value =
+"""
+    SELECT COUNT(*) FROM event_registrations WHERE event_id = :id
+                                              AND event_registration_status = :eventRegistrationStatus
 
-  Event findById(Integer id);
-
-  Collection<Event> findAll();
-
-  void delete(Integer id);
-
-  boolean existsById(Integer id);
-
-  boolean existsByName(String name);
-
-  EventSummaryResponse getEventSummary(int eventId);
-
-  Map<String, Long> groupByFillStatus();
-
-  List<Event> findMostPopular(int limit);
+""",
+      nativeQuery = true)
+  long countRegistrationsByStatus(
+      @Param("id") Long id, @Param("eventRegistrationStatus") String eventRegistrationStatus);
+  //  List<Event> findMostPopular(int limit);
 }
