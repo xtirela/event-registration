@@ -19,12 +19,12 @@ java {
 }
 
 application {
-    mainClass = 'view.Main'
+    mainClass = 'com.eventreg.PartyApplication'
 }
 
 jar {
     manifest {
-        attributes 'Main-Class': 'view.Main'
+        attributes 'Main-Class': 'com.eventreg.PartyApplication'
     }
 }
 
@@ -46,11 +46,17 @@ jacocoTestReport {
 
 dependencies {
     // Spring Boot Starters
+
+    implementation "org.mapstruct:mapstruct:1.6.3"
+
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    implementation("io.jsonwebtoken:jjwt:0.13.0")
 
     // OpenAPI
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.0'
@@ -64,17 +70,34 @@ dependencies {
     // Тесты
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
+
+    testImplementation "org.testcontainers:testcontainers:2.0.5"
+
     testImplementation 'org.testcontainers:postgresql:1.21.4'
     testImplementation 'org.testcontainers:junit-jupiter:1.21.4'
+
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok:1.18.46'
     annotationProcessor 'org.projectlombok:lombok:1.18.46'
     testCompileOnly 'org.projectlombok:lombok:1.18.46'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.46'
+
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+
+    implementation("org.mnode.ical4j:ical4j:4.3.0")
+
+    implementation("com.github.kuliginstepan:dadata-client:4.0.0")
+
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+
+    annotationProcessor "org.mapstruct:mapstruct-processor:1.6.3"
+    testAnnotationProcessor "org.mapstruct:mapstruct-processor:1.6.3"
 
     // Checkstyle
     checkstyleConfig("com.puppycrawl.tools:checkstyle:10.18.0") {
@@ -95,8 +118,4 @@ spotless {
 
 test {
     useJUnitPlatform()
-}
-
-run {
-    standardInput = System.in
 }

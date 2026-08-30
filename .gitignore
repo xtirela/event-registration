@@ -5,6 +5,7 @@ build/
 !**/src/test/**/build/
 .kotlin
 data/
+gradle.properties
 
 ### IntelliJ IDEA ###
 .idea/modules.xml
@@ -45,3 +46,4 @@ bin/
 
 ### Persistence ###
 data/
+.env

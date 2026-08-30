@@ -1,8 +1,8 @@
 package com.eventreg.dto.response;
 
+import com.eventreg.model.enums.ActionType;
 import lombok.Builder;
 import lombok.Data;
-import com.eventreg.model.enums.ActionType;
 
 @Data
 @Builder
