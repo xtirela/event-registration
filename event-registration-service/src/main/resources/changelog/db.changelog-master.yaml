@@ -1,0 +1,16 @@
+databaseChangeLog:
+  - include:
+      file: changes/001-create-events.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/002-rename-event-duration.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/003-create-idempotency-keys.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/004-organizer-keycloak-id-text-unique.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/005-organizer-event-name-unique.sql
+      relativeToChangelogFile: true
