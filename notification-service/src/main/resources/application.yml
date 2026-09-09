@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: notification-service
+
+  config:
+    import: vault://
+  cloud:
+    vault:
+      uri: http://localhost:8200
+      token: ${VAULT_TOKEN:root-token}
+      kv:
+        enabled: true
+        backend: secret
+
+resend:
+  api-key: ${resend.api-key}
+
+server:
+  port: 8084
