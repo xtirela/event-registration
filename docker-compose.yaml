@@ -1,0 +1,343 @@
+services:
+
+  # Dev Vault: auto-initialized and unsealed, KV v2 at secret/ enabled, in-memory.
+  # Root token = ${VAULT_TOKEN} (root-token by default). Secrets are seeded by
+  # vault-seed below; rerun `docker compose up vault-seed` to reseed on demand.
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-root-token}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://127.0.0.1:8200
+    command: ["server", "-dev"]
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - eventreg-backend
+
+  # One-shot seeder: writes service secrets into KV v2 `secret/<app-name>` from
+  # .env, so the Spring services' `spring.config.import: vault://` resolves.
+  # Apps must wait for it via `service_completed_successfully`.
+  vault-seed:
+    image: hashicorp/vault:latest
+    container_name: vault-seed
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN:-root-token}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      DADATA_TOKEN: ${DADATA_TOKEN:-}
+      EVENT_DB_PASSWORD: ${EVENT_DB_PASSWORD:-postgres}
+      REGISTRATION_DB_PASSWORD: ${REGISTRATION_DB_PASSWORD:-postgres}
+      PARTICIPANT_DB_PASSWORD: ${PARTICIPANT_DB_PASSWORD:-postgres}
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - >-
+        vault login "${VAULT_TOKEN}" >/dev/null &&
+        vault kv put secret/notification-service resend.api-key="${RESEND_API_KEY}" &&
+        vault kv put secret/user-service keycloak.client-secret="${KEYCLOAK_CLIENT_SECRET}" &&
+        vault kv put secret/event-service dadata.token="${DADATA_TOKEN}"
+        spring.datasource.username=postgres spring.datasource.password="${EVENT_DB_PASSWORD}" &&
+        vault kv put secret/event-registration-service
+        spring.datasource.username=postgres spring.datasource.password="${REGISTRATION_DB_PASSWORD}" &&
+        vault kv put secret/participant-service
+        spring.datasource.username=postgres spring.datasource.password="${PARTICIPANT_DB_PASSWORD}" &&
+        echo "vault seeded"
+    restart: "no"
+    networks:
+      - eventreg-backend
+
+  event-service:
+    build: ./event-service
+    image: eventreg/event-service:local
+    container_name: event-service
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    depends_on:
+      event-service-postgres:
+        condition: service_healthy
+      vault-seed:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://event-service-postgres:5432/event_service_db
+      SPRING_CLOUD_VAULT_URI: http://vault:8200
+      SPRING_CLOUD_VAULT_TOKEN: ${VAULT_TOKEN}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/oauth
+      EVENT_REGISTRATION_SERVICE_URL: http://event-registration-service:8083
+      NOTIFICATION_SERVICE_URL: http://notification-service:8084
+    ports:
+      - "8082:8082"
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  event-registration-service:
+    build: ./event-registration-service
+    image: eventreg/event-registration-service:local
+    container_name: event-registration-service
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    depends_on:
+      event-registration-service-postgres:
+        condition: service_healthy
+      vault-seed:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://event-registration-service-postgres:5432/event_registration_service_db
+      SPRING_CLOUD_VAULT_URI: http://vault:8200
+      SPRING_CLOUD_VAULT_TOKEN: ${VAULT_TOKEN}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/oauth
+      EVENT_SERVICE_URL: http://event-service:8082
+      PARTICIPANT_SERVICE_URL: http://participant-service:8081
+    ports:
+      - "8083:8083"
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  participant-service:
+    build: ./participant-service
+    image: eventreg/participant-service:local
+    container_name: participant-service
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    depends_on:
+      participant-service-postgres:
+        condition: service_healthy
+      vault-seed:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://participant-service-postgres:5432/participant_service_db
+      SPRING_CLOUD_VAULT_URI: http://vault:8200
+      SPRING_CLOUD_VAULT_TOKEN: ${VAULT_TOKEN}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/oauth
+    ports:
+      - "8081:8081"
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  notification-service:
+    build: ./notification-service
+    image: eventreg/notification-service:local
+    container_name: notification-service
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    depends_on:
+      vault-seed:
+        condition: service_completed_successfully
+    environment:
+      SPRING_CLOUD_VAULT_URI: http://vault:8200
+      SPRING_CLOUD_VAULT_TOKEN: ${VAULT_TOKEN}
+    ports:
+      - "8084:8084"
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  api-gateway:
+    build: ./api-gateway
+    image: eventreg/api-gateway:local
+    container_name: api-gateway
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    environment:
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/oauth
+    ports:
+      - "8080:8080"
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  user-service:
+    build: ./user-service
+    image: eventreg/user-service:local
+    container_name: user-service
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    depends_on:
+      vault-seed:
+        condition: service_completed_successfully
+    environment:
+      SPRING_CLOUD_VAULT_URI: http://vault:8200
+      SPRING_CLOUD_VAULT_TOKEN: ${VAULT_TOKEN}
+      KEYCLOAK_BASE_URL: http://keycloak:8080
+    ports:
+      - "8085:8085"
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  event-registration-service-postgres:
+    image: postgres:latest
+    container_name: event-registration-service-postgres
+    environment:
+      POSTGRES_DB: event_registration_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${REGISTRATION_DB_PASSWORD:-postgres}
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    ports:
+      - "5436:5432"
+    volumes:
+      - event-registration-service-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d event_registration_service_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  event-service-postgres:
+    image: postgres:latest
+    container_name: event-service-postgres
+    environment:
+      POSTGRES_DB: event_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${EVENT_DB_PASSWORD:-postgres}
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    ports:
+      - "5435:5432"
+    volumes:
+      - event-service-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d event_service_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  participant-service-postgres:
+    image: postgres:latest
+    container_name: participant-service-postgres
+    environment:
+      POSTGRES_DB: participant_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PARTICIPANT_DB_PASSWORD:-postgres}
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    ports:
+      - "5434:5432"
+    volumes:
+      - participant-service-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d participant_service_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: eventreg-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    ports:
+      - "5050:80"
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  postgres-kc:
+    image: postgres:latest
+    container_name: keycloak_postgres
+    mem_swappiness: 0
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.5
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-kc-data:/var/lib/postgresql
+    networks:
+      - eventreg-backend
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: keycloak
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres-kc
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      KC_HOSTNAME: http://keycloak:8080
+      KC_HOSTNAME_ADMIN: http://localhost:9090
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "9090:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    networks:
+      - eventreg-backend
+    depends_on:
+      - postgres-kc
+    restart: unless-stopped
+
+volumes:
+  postgres-kc-data:
+    name: keycloak-postgres-data
+  participant-service-postgres-data:
+    name: participant-service-postgres-data
+  event-service-postgres-data:
+    name: event-service-postgres-data
+  event-registration-service-postgres-data:
+    name: event-registration-service-postgres-data
+
+networks:
+  eventreg-backend:
+    name: eventreg-backend
+    driver: bridge

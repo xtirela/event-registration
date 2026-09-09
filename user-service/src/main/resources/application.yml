@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: user-service
+
+  config:
+    import: vault://
+  cloud:
+    vault:
+      uri: http://localhost:8200
+      token: ${VAULT_TOKEN:root-token}
+      kv:
+        enabled: true
+        backend: secret
+
+keycloak:
+  base-url: http://localhost:9090
+  realm: oauth
+  client-id: myclient
+  client-secret: ${keycloak.client-secret}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        failureRateThreshold: 50
+        slidingWindowSize: 5
+        minimumNumberOfCalls: 5
+        waitDurationInOpenState: 10s
+        ignoreExceptions:
+          - org.springframework.web.server.ResponseStatusException
+    instances:
+      keycloak:
+        baseConfig: default
+
+server:
+  port: 8085
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always

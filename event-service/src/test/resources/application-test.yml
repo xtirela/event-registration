@@ -1,0 +1,33 @@
+spring:
+  config:
+    import:
+  cloud:
+    vault:
+      enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: none
+  liquibase:
+    enabled: false
+
+event:
+  registration:
+    service:
+      url: http://localhost:9999
+
+notification:
+  service:
+    url: http://localhost:9999
+
+dadata:
+  token: dummy-token
+
+resilience4j:
+  retry:
+    retryAspectOrder: 2
+    instances:
+      event-registration-service-retry:
+        max-attempts: 3
+        wait-duration: 100ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2

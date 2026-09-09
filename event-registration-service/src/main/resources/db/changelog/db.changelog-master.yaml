@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - include:
+      file: changes/001-create-event-registrations.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/002-create-idempotency-keys.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/003-add-unique-event-participant.sql
+      relativeToChangelogFile: true
