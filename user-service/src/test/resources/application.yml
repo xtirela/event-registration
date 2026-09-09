@@ -1,0 +1,12 @@
+spring:
+  config:
+    import:
+  cloud:
+    vault:
+      enabled: false
+
+keycloak:
+  base-url: http://localhost:9090
+  realm: oauth
+  client-id: myclient
+  client-secret: test-client-secret

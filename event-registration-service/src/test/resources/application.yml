@@ -1,0 +1,54 @@
+spring:
+  config:
+    import:
+  cloud:
+    vault:
+      enabled: false
+
+event:
+  service:
+    url: http://localhost:9999
+
+participant:
+  service:
+    url: http://localhost:9999
+
+resilience4j:
+  circuitbreaker:
+    circuitBreakerAspectOrder: 1
+    instances:
+      event-service-circuit-breaker:
+        failure-rate-threshold: 50
+        minimum-number-of-calls: 5
+        wait-duration-in-open-state: 5s
+        sliding-window-size: 10
+      participant-service-circuit-breaker:
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        sliding-window-size: 10
+  retry:
+    retryAspectOrder: 2
+    instances:
+      event-service-retry:
+        max-attempts: 3
+        wait-duration: 100ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+      participant-service-retry:
+        max-attempts: 3
+        wait-duration: 100ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+
+server:
+  port: 8083
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always

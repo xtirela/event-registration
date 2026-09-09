@@ -1,0 +1,115 @@
+spring:
+  application:
+    name: api-gateway
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9090/realms/oauth
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          routes:
+            - id: user
+              uri: http://localhost:8085
+              predicates:
+                - Path=/register,/login
+
+            - id: participant
+              uri: http://localhost:8081
+              predicates:
+                - Path=/participants/**
+              filters:
+                - name: RewritePath
+                  args:
+                    regexp: /participants(?<segment>/?.*)
+                    replacement: /api/participants${segment}
+                - name: Retry
+                  args:
+                    retries: 4
+                    series: SERVER_ERROR
+                    methods: GET,POST,PATCH,DELETE
+                    backoff:
+                      firstBackoff: 100ms
+                      maxBackoff: 1000ms
+                      factor: 2
+                - name: CircuitBreaker
+                  args:
+                    id: participantCB
+                    fallbackUri: forward:/fallback/participant
+
+            - id: event
+              uri: http://localhost:8082
+              predicates:
+                - Path=/events/**
+              filters:
+                - name: RewritePath
+                  args:
+                    regexp: /events(?<segment>/?.*)
+                    replacement: /api/events${segment}
+                - name: Retry
+                  args:
+                    retries: 4
+                    series: SERVER_ERROR
+                    methods: GET,POST,PATCH,DELETE
+                    backoff:
+                      firstBackoff: 100ms
+                      maxBackoff: 1000ms
+                      factor: 2
+                - name: CircuitBreaker
+                  args:
+                    id: eventCB
+                    fallbackUri: forward:/fallback/event
+
+            - id: registration
+              uri: http://localhost:8083
+              predicates:
+                - Path=/registrations/**
+              filters:
+                - name: RewritePath
+                  args:
+                    regexp: /registrations(?<segment>/?.*)
+                    replacement: /api/registrations${segment}
+                - name: Retry
+                  args:
+                    retries: 4
+                    series: SERVER_ERROR
+                    methods: GET,POST,PATCH,DELETE
+                    backoff:
+                      firstBackoff: 100ms
+                      maxBackoff: 1000ms
+                      factor: 2
+                - name: CircuitBreaker
+                  args:
+                    id: registrationCB
+                    fallbackUri: forward:/fallback/registration
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        failureRateThreshold: 50
+        slidingWindowSize: 5
+        minimumNumberOfCalls: 5
+        waitDurationInOpenState: 10s
+    instances:
+      participantCB:
+        baseConfig: default
+      eventCB:
+        baseConfig: default
+      registrationCB:
+        baseConfig: default
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,circuitbreakers
+  endpoint:
+    health:
+      show-details: always

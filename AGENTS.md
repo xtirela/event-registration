@@ -1,63 +1,119 @@
 # AGENTS.md
 
-Консольное приложение — сервис записи на мероприятие (консольный интерфейс для организатора).
-roadmap java_roadmap пройден до «Модуля 3» (Docker, GHCR, SLF4J+Logback). Текущий этап —
-«Модуль 4»: перевести хранилище с in-memory на PostgreSQL (JDBC + Liquibase + Testcontainers)
-без перехода на Spring. Интерфейс репозитория менять нельзя — меняется только реализация.
+Микросервисный проект «Модуль 6». Legacy-монолит из корня **удалён** — нет `src/`, корневых
+`build.gradle`/`settings.gradle`/`gradlew`/`gradle.properties`. Репозиторий — 6 независимых
+Spring Boot сервисов. Работаем строго внутри каталога каждого сервиса.
 
-## Команды
-- Сборка / тесты:            `./gradlew build`, `./gradlew test`
-- Один тест:                 `./gradlew test --tests "com.eventreg.service.EventServiceImplTest"`
-- Стиль:                     `./gradlew checkstyleMain checkstyleTest`
-- Формат (авто):             `./gradlew spotlessApply`   (Spotless googleJavaFormat)
-- Запуск меню (локально):    `./gradlew run`   (mainClass = com.eventreg.PartyApplication; standardInput = System.in)
+## Ключевой факт: НЕ Gradle multi-module билд
 
-## Docker
-- Собрать: `docker compose build`; поднять: `docker compose up -d`.
-- Приложение ИНТЕРАКТИВНОЕ, а `docker compose up` не пробрасывает stdin. Для ввода с клавиатуры
-  запускать через `docker compose run --rm eventreg` (выделяет TTY + stdin).
-- Dockerfile: multi-stage + jlink (jlink обязан иметь `--add-modules`, иначе падает).
-- Named volume `eventreg-data` монтируется в `/app/data` — туда приложение пишет CSV
-  (application.properties). Менять таргет нельзя.
-- Образ публикуется в GHCR через `.github/workflows/docker-build-push.yaml` (push в main/dev,
-  логин через `secrets.GITHUB_TOKEN`, packages: write).
+- Общего многопроектного билда **нет**. Каждый сервис — самостоятельный Gradle-проект со своим
+  `build.gradle`, wrapper'ом и `gradlew`. Сборка только изнутри каталога:
+  `(cd event-service && ./gradlew build)`. Корневого `./gradlew` не существует.
+- Исключения: `notification-service` не поднимает Keycloak; auth у всех — через Keycloak
+  (см. ниже).
 
-## Архитектура (состояние «Модуль 3» — цель «Модуля 4»)
-- Слои: view (ConsoleView, com.eventreg.PartyApplication) → service (EventService / EventServiceImpl) → repository (интерфейсы
-  + impl). Хранилище пока in-memory: `SimpleHashMap`/`SimpleLinkedList`/`SimpleArrayList` из пакета
-  `collection` (свои реализации стандартных коллекций).
-- 3 доменные сущности: `Event`, `Participant`, `EventRegistration` (+ enum-статусы в `model.enums`).
-- Цель «Модуля 4» — заменить in-memory репозитории на `JdbcXxxRepository` (PreparedStatement, без
-  ORM), схему — через Liquibase (уже лежит в `src/main/resources/db/changelog/db.changelog.sql`),
-  интеграционные тесты — на Testcontainers (реальная PostgreSQL, без H2).
-- Иерархия исключений: `EventRegException` (RuntimeException) + `EventNotFoundException`,
-  `ParticipantNotFoundException`, `DuplicateException`, `EventCapacityExceededException`,
-  `RegistrationNotFoundException`, `IllegalArgumentEventRegException`.
-- Валидация бросает исключения (не возвращает DTO с текстом ошибки).
+## Сервисы и их настройка
 
-## Особенности настройки
-- Toolchain в build.gradle — Java 25, а не 21 из roadmap (и в CI тоже 25).
-- gradle.properties в .gitignore: задаёт машинозависимый tmpdir (/home/spiteset/tmp)
-  и включает configuration-cache. Не коммить его; на другой машине создаётся свой.
-- Файлы в CRLF + core.autocrlf=true. Перед большими правками запускай spotlessApply,
-  чтобы Spotless/Checkstyle не тонули в переносах строк.
-- `data/` (CSV из модуля 2) в .gitignore — не коммитить рантайм-состояние.
+| Сервис | Порт | БД (PostgreSQL из compose) | Роль |
+|---|---|---|---|
+| `api-gateway` | 8080 | — | маршруты → participant/event/registration, Retry+CircuitBreaker |
+| `participant-service` | 8081 | `5434/participant_service_db` | участники |
+| `event-service` | 8082 | `5435/event_service_db` | события, принятие решений, waiting-queue |
+| `event-registration-service` | 8083 | `5436/event_registration_service_db` | регистрации, promotion |
+| `notification-service` | 8084 | — | email через Resend |
+| `user-service` | 8085 | — | auth-фасад над Keycloak: `POST /register`, `POST /login` |
 
-## Postgres MCP
-- MCP-сервер `postgres-mcp` (crystaldba/postgres-mcp, запущен как Docker-контейнер) подключён к
-  live-БД приложения: контейнер `eventreg-postgres`, БД `eventreg_db`, localhost:5432,
-  postgres/postgres.
-- Инструменты: `execute_sql`, `explain_query`, `analyze_query_indexes`, `analyze_workload_indexes`,
-  `analyze_db_health`, `get_top_queries`, `get_object_details`, `list_objects`, `list_schemas`,
-  `list_mcp_resources`.
-- Назначение — ad-hoc инспекция схемы/данных, анализ планов запросов и индексов, поиск корня
-  проблем (id-последовательности, FK, состояние таблиц). НЕ использовать для проверки тестов:
-  тесты гоняют свежий Testcontainers `postgres:18`, а не эту БД.
+Все сервисы подключают Vault (localhost:8200, dev-mode `vault server -dev`, корневой токен
+`${VAULT_TOKEN:-root-token}` из `.env`) и, кроме `notification-service`, Keycloak (issuer
+`http://localhost:9090/realms/oauth`), БД — через datasource + liquibase + `ddl-auto: validate`.
+Данные для datasource (`spring.datasource.username/password`), API-ключи и клиентские секреты тоже
+приходят из Vault. `user-service` — **без БД и без хранения паролей**: register/login
+делегируются Keycloak (клиент `myclient`: Direct Access Grants для `password` grant, service
+account с ролью `manage-users` для Admin API; секрет — `secret/user-service/keycloak.client-secret`
+в Vault). Рега → Keycloak создаёт юзера и назначает роль `ROLE_PARTICIPANT` или `ROLE_ORGANISER`
+(composite в реалме).
 
-## Соглашения
-- Маппинг model → DTO через рукописные builder-методы (eventToEventResponse,
-  participantToParticipantResponse); DTO — Lombok @Builder. Сервисы зависят от интерфейса,
-  реализация держит состояние (для модуля 4 — через репозиторий).
-- Логирование через SLF4J (logback.xml, уровни INFO/WARN/ERROR) — `System.out` в коде не допускается.
-- Тесты: JUnit 5 (junit-bom 5.10); unit-тесты в src/test/java/{service,view,collection,repository};
-  ConsoleViewTest гоняет Scanner через ByteArrayInputStream.
+### Vault: provisioning и секреты
+
+- Vault в compose — dev (KV v2 на `secret/` включён, unsealed, in-memory). Корневой токен —
+  `VAULT_TOKEN` из `.env` (дефолт `root-token`).
+- One-shot `vault-seed` (compose, `depends_on: vault: service_healthy`) пишет секреты из `.env` в
+  KV v2 `secret/<application.name>` на каждый `up`. Приложения ждут его через
+  `service_completed_successfully`.
+- Пути: `secret/notification-service/resend.api-key`, `secret/user-service/keycloak.client-secret`,
+  `secret/event-service` (`dadata.token`, `spring.datasource.username/password`),
+  `secret/event-registration-service` и `secret/participant-service` (datasource creds).
+- `.env` в .gitignore (не коммитить). `KEYCLOAK_CLIENT_SECRET` и `DADATA_TOKEN` заполняются вручную.
+
+## Состояние сборки (проверено)
+
+- `event-service`, `participant-service`, `event-registration-service`, `user-service`,
+  `api-gateway`: **компилируются**, `spotlessApply` + `checkstyleMain` зелёные (полная сборка
+  user-service — `./gradlew build`).
+- Ранее `user-service` «не компилировался» (старые пакеты `com.eventreg.security.*`) — заменён
+  новым auth-фасадом (см. выше). Были чинимы: у `api-gateway` отсутствовала декларация
+  `checkstyleConfig(...)` в `build.gradle` (checkstyle падал с «Expected file collection to contain
+  exactly one file») — добавлена.
+- Тесты — smoke `*ApplicationTests` (поднятие контекста; требуют поднятого стека compose) и
+  api-контрактные тесты с WireMock (`EventServiceImplFeignTests`,
+  `EventRegistrationServiceImplFeignTests`, `EventRegistrationServiceImplFeignResilience4jTests`,
+  `SecurityGuardFeignTests`, `ApiGatewayResilience4jTests`).
+
+## Идемпотентность (важно, новый паттерн)
+
+В 3 сервисах (`event`, `participant`, `event-registration`) — одинаковый аспект
+`IdempotencyAspect` + `@Idempotent` + таблица `idempotency_keys` (ключ = PK).
+
+Паттерн **claim-first** (исправляет TOCTOU):
+
+1. `IdempotencyRepository.claim(key, method, path)` — нативный
+   `INSERT ... ON CONFLICT (key) DO NOTHING` (`http_status` пишется плейсхолдером `'OK'`,
+   `response_body` = NULL).
+2. Выигравший выполняет бизнес-логику, затем `findById` + проставляет `http_status`/`response_body`
+   и `save()`. Если бизнес-логика бросила — claim удаляется (`deleteById`), ретрай перезапустится.
+3. Проигравший (`claim()` вернул 0) опрашивает строку каждые 100 мс до 3 с и возвращает сохранённый
+   ответ. `response_body == NULL` ⟺ обработка ещё идёт. Таймаут / несовпадение method+path → 409.
+
+Известный потолок (marked `ponytail:` в коде): если победитель умрёт в процессе, claim без
+`response_body` зависнет и ретраи получат 409 (апгрейд — TTL-джоба); sleep-poll — busy-wait
+(апгрейд — DB WAITFOR/outbox).
+
+## Кросс-сервисные потоки и решения
+
+- `event-registration-service` → Feign к `event-service` (`getRegistrationDecision`,
+  `getOrganizerKeycloakId`) и `participant-service` (`getKeycloakId`, для SecurityGuard).
+  Решение по регистрации принимает **event-service** (CAS `tryAcquireSeat`).
+- `event-service` → Feign к `event-registration-service` (счётчики, `getWaitingQueue`,
+  `promoteWaitingQueue`) и к `notification-service` (email при создании события).
+- Сходимость состояния (`места ↔ регистрации`, promotion WAITING→ACCEPTED) — через 60-сек
+  `WaitingQueueScheduler` (reconcile-поллер). **Outbox осознанно НЕ нужен** — один сайд-эффект
+  (email) и уже существующий руками сделанный поллер; см. анализ.
+- Email при создании события — fire-and-forget `CompletableFuture` в `EventServiceImpl.createEvent`
+  (задеференшено комментарием `ponytail:`; при нагрузке — executor + retry).
+
+## Что устарело/сломано (не спотыкайся)
+
+- **CI `.github/workflows/build.yaml` и `docker-build-push.yaml`** гоняют корневой `./gradlew` и
+  корневой контекст — сломаны (в корне нет wrapper). Не проверяют сервисы.
+- **`docker-compose.yaml`**: приложения собираются в контейнеры из per-service Dockerfile
+  (`build: ./<service>`); БД трёх сервисов (5434/5435/5436), keycloak (9090, БД 5433), vault (8200,
+  dev + one-shot `vault-seed`), pgadmin (5050). `user-service` в compose отсутствует — поднимается
+  локально из IDE/`./gradlew bootRun` и не маршрутизируется из шлюза.
+- `user-service` — auth-фасад без БД; `notification-service` не поднимает Keycloak.
+
+## Настройка / особенности
+
+- `gradle.properties` (корневой и per-service) в .gitignore — машинозависимый tmpdir +
+  configuration-cache. Не коммить.
+- `.gitattributes` задаёт `eol=lf` для java/gradle/xml/properties.
+- Перед большими правками Java запускай `./gradlew spotlessApply` (googleJavaFormat), затем
+  `checkstyleMain checkstyleTest` — иначе Checkstyle тонет в переносах строк.
+- Валидация бросает исключения, а не возвращает DTO с текстом ошибки.
+- Секреты — только в Vault (см. раздел «Vault: provisioning и секреты») или env из `.env`; в
+  application.yml — плейсхолдеры `${...}`, без хардкода значений. Не дублировать, не выносить в логи.
+
+## Postgres MCP / базы
+
+- `postgres-mcp` подключён к live-БД в compose: контейнеры `*-postgres`, БД
+  `*_service_db` на 5434/5435/5436, postgres/postgres, localhost.
+- Назначение — ad-hoc инспекция схемы/данных/планов/индексов. Тесты к этим live-БД не подключаются.
