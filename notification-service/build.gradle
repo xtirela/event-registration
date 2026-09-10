@@ -96,4 +96,7 @@ dependencyManagement {
 
 tasks.named('test') {
     useJUnitPlatform()
+    filter {
+        setFailOnNoMatchingTests(false)
+    }
 }
