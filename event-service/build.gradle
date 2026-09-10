@@ -110,6 +110,6 @@ spotless {
 tasks.named('test') {
     useJUnitPlatform()
     filter {
-        isFailOnNoMatchingTests = false
+        setFailOnNoMatchingTests(false)
     }
 }
