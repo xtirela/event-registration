@@ -22,6 +22,7 @@ jobs:
     outputs:
       services: ${{ steps.detect.outputs.services }}
     steps:
+      - uses: actions/checkout@v4
       - id: detect
         run: |
           SERVICES=$(find . -maxdepth 2 -name gradlew -exec dirname {} \; \
