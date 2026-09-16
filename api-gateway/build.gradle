@@ -54,7 +54,6 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
     testImplementation "org.wiremock:wiremock-standalone:3.13.2"
-
     checkstyleConfig("com.puppycrawl.tools:checkstyle:10.18.0") {
         transitive = false
     }
