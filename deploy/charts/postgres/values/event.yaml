@@ -1,0 +1,5 @@
+fullnameOverride: postgres-event
+database: event_service_db
+secret:
+  name: vault-seed
+  key: EVENT_DB_PASSWORD

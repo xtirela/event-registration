@@ -1,0 +1,70 @@
+apiVersion: v2
+name: eventreg
+description: Umbrella chart - full event platform stack + NGINX Ingress (TLS).
+type: application
+version: 0.1.0
+
+dependencies:
+  - name: nginx-ingress
+    repository: oci://ghcr.io/nginx/charts
+    version: 2.7.1
+
+  - name: vault
+    repository: file://../vault
+    version: 0.1.0
+  - name: seeder
+    repository: file://../seeder
+    version: 0.1.0
+  - name: notification-service
+    repository: file://../notification-service
+    version: 0.1.0
+  - name: keycloak
+    repository: file://../keycloak
+    version: 0.1.0
+
+  # One postgres chart instance per database (values/*.yaml in postgres chart).
+  - name: postgres
+    repository: file://../postgres
+    version: 0.1.0
+    alias: postgres-event
+  - name: postgres
+    repository: file://../postgres
+    version: 0.1.0
+    alias: postgres-reg
+  - name: postgres
+    repository: file://../postgres
+    version: 0.1.0
+    alias: postgres-participant
+  - name: postgres
+    repository: file://../postgres
+    version: 0.1.0
+    alias: postgres-kc
+
+  - name: user-service
+    repository: file://../user-service
+    version: 0.1.0
+  - name: api-gateway
+    repository: file://../api-gateway
+    version: 0.1.0
+  - name: event-service
+    repository: file://../event-service
+    version: 0.1.0
+  - name: event-registration-service
+    repository: file://../event-registration-service
+    version: 0.1.0
+  - name: participant-service
+    repository: file://../participant-service
+    version: 0.1.0
+
+  # EFK stack (official images; elastic.co chart tgz 403s on this host so
+  # kibana/elasticsearch tarballs are vendored into charts/).
+  - name: elasticsearch
+    repository: https://helm.elastic.co
+    version: 8.5.1
+    condition: elasticsearch.enabled
+  - name: kibana
+    repository: https://helm.elastic.co
+    version: 8.5.1
+  - name: fluent-bit
+    repository: https://fluent.github.io/helm-charts
+    version: 0.58.2

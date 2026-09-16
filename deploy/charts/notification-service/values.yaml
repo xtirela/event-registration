@@ -1,0 +1,26 @@
+replicaCount: 1
+
+image:
+  repository: eventreg/notification-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+vault:
+  uri: http://vault:8200
+  token: root-token
+
+secrets:
+  # If empty, resend.api-key is read from Vault (project convention, Vault is
+  # authoritative). Set to prefer the K8s Secret as the source for the key.
+  resendApiKey: ""
+
+service:
+  port: 8084
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 250m
+    memory: 512Mi

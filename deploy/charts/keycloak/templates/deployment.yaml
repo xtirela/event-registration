@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keycloak.fullname" . }}
+  namespace: eventreg
+  labels:
+    app: {{ include "keycloak.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "keycloak.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "keycloak.fullname" . }}
+    spec:
+      containers:
+        - name: keycloak
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["start-dev", "--import-realm", "--features=scripts", "--spi-script-upload-enabled=true", "--health-enabled=true",]
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              value: {{ .Values.db.host | quote }}
+            - name: KC_DB_URL_PORT
+              value: {{ .Values.db.port | quote }}
+            - name: KC_DB_URL_DATABASE
+              value: {{ .Values.db.database | quote }}
+            - name: KC_DB_SCHEMA
+              value: {{ .Values.db.schema | quote }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.db.user | quote }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.passwordSecretName | quote }}
+                  key: {{ .Values.db.passwordSecretKey | quote }}
+            - name: KC_HOSTNAME
+              value: {{ .Values.hostname | quote }}
+            - name: KEYCLOAK_ADMIN
+              value: {{ .Values.admin.user | quote }}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              value: {{ .Values.admin.password | quote }}
+          volumeMounts:
+            - name: realm-conf
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: realm-conf
+          configMap:
+            name: {{ .Values.realm.configMapName | quote }}

@@ -1,0 +1,172 @@
+# Umbrella: each chart already carries correct cluster defaults, nothing to
+# override except ingress (which lives in this chart's own templates/).
+
+ingress:
+  # *.sslip.io resolves <ip>.sslip.io without /etc/hosts.
+# Self-signed cert lives in files/tls.{crt,key} (CN/SAN = api/keycloak.<ip>.sslip.io)
+# and is rendered as a kubernetes.io/tls Secret by templates/tls-secret.yaml.
+# Regen if minikube ip changes:
+#   openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+#     -keyout deploy/charts/eventreg/files/tls.key \
+#     -out deploy/charts/eventreg/files/tls.crt \
+#     -subj "/CN=api.$(minikube ip).sslip.io" \
+#     -addext "subjectAltName=DNS:api.$(minikube ip).sslip.io,DNS:keycloak.$(minikube ip).sslip.io"
+  enabled: true
+  tlsSecretName: eventreg-tls
+  apiHost: "api.127.0.0.1.sslip.io"
+  keycloakHost: "keycloak.127.0.0.1.sslip.io"
+
+nginx-ingress:
+  controller:
+    ingressClass:
+      # class already named "nginx" by default; Helm picks it up.
+      name: nginx
+
+# One postgres StatefulSet per alias; fullnameOverride is also the Service DNS
+# the matching Spring app uses as datasource host (event-service -> postgres-event
+# etc). Passwords come from the vault-seed Secret (generated below from .env).
+postgres-event:
+  fullnameOverride: postgres-event
+  database: event_service_db
+  secret:
+    name: vault-seed
+    key: EVENT_DB_PASSWORD
+postgres-reg:
+  fullnameOverride: postgres-reg
+  database: event_registration_service_db
+  secret:
+    name: vault-seed
+    key: REGISTRATION_DB_PASSWORD
+postgres-participant:
+  fullnameOverride: postgres-participant
+  database: participant_service_db
+  secret:
+    name: vault-seed
+    key: PARTICIPANT_DB_PASSWORD
+postgres-kc:
+  fullnameOverride: postgres-kc
+  database: keycloak
+  secret:
+    name: vault-seed
+    key: KEYCLOAK_DB_PASSWORD
+
+# Prometheus/Grafana is deployed as a SEPARATE kube-prometheus-stack release
+# (it ships ~5MB of CRDs+dashboards which would blow the 1MB Helm release
+# secret if bundled here). ServiceMonitors below hook the app services into
+# that stack. Install order: kube-prometheus-stack first, then this umbrella
+# (the ServiceMonitors need its monitoring.coreos.com/v1 CRDs).
+monitoredServices:
+  - name: api-gateway
+  - name: event-service
+  - name: event-registration-service
+  - name: participant-service
+  - name: user-service
+  - name: notification-service
+
+# --- EFK (elasticsearch + kibana + fluent-bit), official Elastic/Fluent charts ---
+# ES default security is kept ON: the ES chart generates elasticsearch-master-credentials
+# (elastic password) and elasticsearch-master-certs (CA); Kibana reads those same secrets
+# out of the box, and fluent-bit authenticates to them below.
+
+elasticsearch:
+  # ES deploys as its OWN release first (install.sh) because its "master-certs" and
+  # "master-credentials" secrets and a running ES are needed by Kibana's pre-install
+  # hook. Disabled here; its values now live in es-values.yaml.
+  enabled: false
+  # no fullnameOverride: fullname defaults to "elasticsearch-master" which is what the
+  # Kibana chart and fluent-bit output reference as the ES host.
+  clusterName: elasticsearch
+  nodeGroup: master
+  replicas: 1
+  minimumMasterNodes: 1
+  roles:
+    - master
+    - data
+  image: docker.elastic.co/elasticsearch/elasticsearch
+  imageTag: 8.5.1
+  esJavaOpts: "-Xms512m -Xmx512m"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  volumeClaimTemplate:
+    accessModes: ["ReadWriteOnce"]
+    resources:
+      requests:
+        storage: 5Gi
+  createCert: true
+  secret:
+    enabled: true
+
+kibana:
+  image: docker.elastic.co/kibana/kibana
+  imageTag: 8.5.1
+  elasticsearchHosts: "https://elasticsearch-master:9200"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+fluent-bit:
+  image:
+    repository: cr.fluentbit.io/fluent/fluent-bit
+    tag: 5.1.2
+  kind: DaemonSet
+  env:
+    - name: ES_USER
+      valueFrom:
+        secretKeyRef:
+          name: elasticsearch-master-credentials
+          key: username
+    - name: ES_PASS
+      valueFrom:
+        secretKeyRef:
+          name: elasticsearch-master-credentials
+          key: password
+  extraVolumes:
+    - name: es-ca
+      secret:
+        secretName: elasticsearch-master-certs
+        items:
+          - key: ca.crt
+            path: ca.crt
+  extraVolumeMounts:
+    - name: es-ca
+      mountPath: /fluent-bit/etc/conf/es-ca
+      readOnly: true
+  config:
+    inputs: |
+      [INPUT]
+          Name              tail
+          Tag               kube.*
+          Path              /var/log/containers/*.log
+          multiline.parser       cri
+          Mem_Buf_Limit     32MB
+          Skip_Long_Lines   On
+    filters: |
+      [FILTER]
+          Name                kubernetes
+          Match               kube.*
+          Merge_Log           On
+          Keep_Log            Off
+          K8S-Logging.Parser  On
+          K8S-Logging.Exclude On
+    outputs: |
+      [OUTPUT]
+          Name            es
+          Match           kube.*
+          Host            elasticsearch-master
+          Port            9200
+          Tls             On
+          Tls.CA_File     /fluent-bit/etc/conf/es-ca/ca.crt
+          HTTP_User       ${ES_USER}
+          HTTP_Passwd     ${ES_PASS}
+          Logstash_Format On
+          Replace_Dots    On
+          Retry_Limit     False

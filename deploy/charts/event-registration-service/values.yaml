@@ -1,0 +1,43 @@
+# event-registration-service in k8s. Needs: postgres-reg (postgres chart,
+# values/registration.yaml), vault + seeder, keycloak (JWT issuer),
+# event-service and participant-service (Feign peers).
+#
+# Install:
+#   helm install event-registration-service deploy/charts/event-registration-service -n eventreg
+
+replicaCount: 1
+
+image:
+  repository: eventreg/event-registration-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+vault:
+  uri: http://vault:8200
+  token: root-token
+
+keycloak:
+  issuerUri: http://keycloak:8080/realms/oauth
+
+datasource:
+  host: postgres-reg
+  port: 5432
+  database: event_registration_service_db
+
+# Paired Feign services (Relaxed binding: event.service.url -> EVENT_SERVICE_URL).
+eventServiceUrl: http://event-service:8082
+participantServiceUrl: http://participant-service:8081
+
+# OpenTelemetry: exports traces to Jaeger via OTLP HTTP (http://jaeger:4318/v1/traces).
+otlpEndpoint: http://jaeger:4318/v1/traces
+
+service:
+  port: 8083
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

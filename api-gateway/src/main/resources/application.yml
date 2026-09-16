@@ -13,12 +13,12 @@ spring:
         webmvc:
           routes:
             - id: user
-              uri: http://localhost:8085
+              uri: ${user.service.url:http://localhost:8085}
               predicates:
                 - Path=/register,/login
 
             - id: participant
-              uri: http://localhost:8081
+              uri: ${participant.service.url:http://localhost:8081}
               predicates:
                 - Path=/participants/**
               filters:
@@ -41,7 +41,7 @@ spring:
                     fallbackUri: forward:/fallback/participant
 
             - id: event
-              uri: http://localhost:8082
+              uri: ${event.service.url:http://localhost:8082}
               predicates:
                 - Path=/events/**
               filters:
@@ -64,7 +64,7 @@ spring:
                     fallbackUri: forward:/fallback/event
 
             - id: registration
-              uri: http://localhost:8083
+              uri: ${event.registration.service.url:http://localhost:8083}
               predicates:
                 - Path=/registrations/**
               filters:

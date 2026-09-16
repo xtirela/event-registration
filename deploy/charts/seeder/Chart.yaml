@@ -1,0 +1,6 @@
+apiVersion: v2
+name: seeder
+description: One-shot Job seeding Vault KV from a K8s Secret (mirrors compose vault-seed)
+type: application
+version: 0.1.0
+appVersion: 1.0.0

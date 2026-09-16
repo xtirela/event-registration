@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "user-service.fullname" . }}
+  namespace: eventreg
+  labels:
+    app: {{ include "user-service.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "user-service.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "user-service.fullname" . }}
+    spec:
+      serviceAccountName: {{ include "user-service.fullname" . }}
+      containers:
+        - name: user-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              name: http
+          env:
+            - name: SPRING_CLOUD_VAULT_URI
+              value: {{ .Values.vault.uri | quote }}
+            - name: SPRING_CLOUD_VAULT_TOKEN
+              value: {{ .Values.vault.token | quote }}
+            - name: KEYCLOAK_BASE_URL
+              value: {{ .Values.keycloak.baseUrl | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.keycloak.realm | quote }}
+            - name: KEYCLOAK_CLIENT_ID
+              value: {{ .Values.keycloak.clientId | quote }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 25
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 25
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

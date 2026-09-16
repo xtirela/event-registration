@@ -1,0 +1,5 @@
+apiVersion: v2
+name: postgres
+description: Single-instance PostgreSQL (Bitnami) for one service. Install once per service with per-service values.
+type: application
+version: 0.1.0

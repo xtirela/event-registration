@@ -1,0 +1,45 @@
+# One Postgres instance per service. Install this chart separately for each
+# service (event, event-registration, participant, keycloak) with its own values:
+#   helm install postgres-event deploy/charts/postgres -n eventreg -f values/event.yaml
+# The Service DNS becomes the value of `fullnameOverride` (e.g. postgres-event),
+# which the consuming Spring app uses as datasource host.
+#
+# Credentials: passwords live in Vault (seeded by the seeder chart from .env)
+# and reach the statefulset via the `vault-seed` Secret (same source Vault was
+# seeded from). key must reference the per-service password key written by
+# seeder (e.g. EVENT_DB_PASSWORD, REGISTRATION_DB_PASSWORD,
+# PARTICIPANT_DB_PASSWORD; KEYCLOAK_DB_PASSWORD for the keycloak instance).
+
+fullnameOverride: postgres-event
+
+secret:
+  name: vault-seed
+  key: EVENT_DB_PASSWORD
+
+image:
+  repository: bitnami/postgresql
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  port: 5432
+
+# Per-service database name (matches POSTGRES_DB in compose, e.g.
+# event_service_db / event_registration_service_db / participant_service_db / keycloak)
+database: event_service_db
+
+# Bitnami runs as UID 1001 (non-root); fsGroup gives the PV group write access.
+podSecurityContext:
+  fsGroup: 1001
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+storage:
+  size: 1Gi
+  storageClass: ""

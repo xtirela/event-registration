@@ -1,0 +1,35 @@
+# user-service in k8s. Needs: vault + seeder (already running, seeds
+# secret/user-service keycloak.client-secret), keycloak (JWT issuer on port 8080).
+#
+# Install:
+#   helm install user-service deploy/charts/user-service -n eventreg
+
+replicaCount: 1
+
+image:
+  repository: eventreg/user-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+vault:
+  uri: http://vault:8200
+  token: root-token
+
+keycloak:
+  baseUrl: http://keycloak:8080
+  realm: oauth
+  clientId: myclient
+  # keycloak.client-secret is NOT in values: it lives in Vault
+  # (secret/user-service, seeded by the seeder job) and is resolved via
+  # spring:config:import: vault:// + kv backend secret.
+
+service:
+  port: 8085
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

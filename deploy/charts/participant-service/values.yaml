@@ -1,0 +1,36 @@
+# participant-service in k8s. Needs: postgres-participant (postgres chart,
+# values/participant.yaml), vault + seeder (seeds secret/participant-service
+# datasource creds), keycloak (JWT issuer).
+#
+# Install:
+#   helm install participant-service deploy/charts/participant-service -n eventreg
+
+replicaCount: 1
+
+image:
+  repository: eventreg/participant-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+vault:
+  uri: http://vault:8200
+  token: root-token
+
+keycloak:
+  issuerUri: http://keycloak:8080/realms/oauth
+
+datasource:
+  host: postgres-participant
+  port: 5432
+  database: participant_service_db
+
+service:
+  port: 8081
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
