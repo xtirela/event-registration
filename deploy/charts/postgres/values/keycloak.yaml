@@ -1,0 +1,12 @@
+fullnameOverride: postgres-kc
+database: keycloak
+secret:
+  name: vault-seed
+  key: KEYCLOAK_DB_PASSWORD
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

@@ -1,0 +1,26 @@
+{{- range .Values.monitoredServices }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .name }}
+  namespace: eventreg
+  labels:
+    app: {{ .name }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ .name }}
+  namespaceSelector:
+    matchNames:
+      - eventreg
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      {{- with .interval }}
+      interval: {{ . }}
+      {{- end }}
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_service_name]
+          targetLabel: application
+---
+{{- end }}

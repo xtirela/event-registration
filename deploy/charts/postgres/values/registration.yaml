@@ -1,0 +1,5 @@
+fullnameOverride: postgres-reg
+database: event_registration_service_db
+secret:
+  name: vault-seed
+  key: REGISTRATION_DB_PASSWORD

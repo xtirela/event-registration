@@ -44,3 +44,6 @@ bin/
 ### Persistence ###
 data/
 .env
+/deploy/charts/keycloak/realm/realm.json
+minikube-linux-amd64
+minikube*

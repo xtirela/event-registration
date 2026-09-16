@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vault.fullname" . }}
+  namespace: eventreg
+  labels:
+    app: {{ include "vault.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "vault.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "vault.fullname" . }}
+    spec:
+      serviceAccountName: {{ include "vault.fullname" . }}
+      containers:
+        - name: vault
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # ponytail: dev-mode, in-memory KV — seeds are written by the separate
+          # `seeder` chart (mirrors compose vault-seed). Upgrade to file backend
+          # + init/unseal (root key in a Secret, initContainer unseals) if
+          # secrets must live in Vault itself.
+          command: ["vault", "server", "-dev"]
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              value: {{ .Values.vault.token | quote }}
+            - name: VAULT_DEV_LISTEN_ADDRESS
+              value: "0.0.0.0:{{ .Values.service.port }}"
+            - name: VAULT_ADDR
+              value: "http://127.0.0.1:{{ .Values.service.port }}"
+          securityContext:
+            capabilities:
+              add: ["IPC_LOCK"]
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              name: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

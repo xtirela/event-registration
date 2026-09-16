@@ -1,0 +1,42 @@
+# One-shot seed Job: same kv put commands as compose vault-seed
+# (docker-compose.yaml:48-57). Re-run after every vault pod restart to reseed:
+#   kubectl delete job seeder --ignore-not-found
+#   helm upgrade seeder deploy/charts/seeder
+# ponytail: no auto-reseed mechanism; add a CronJob variant if reseeding on
+# vault restarts must be automatic.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "seeder.fullname" . }}
+  namespace: eventreg
+  labels:
+    app: {{ include "seeder.fullname" . }}
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.seed.secretName | quote }}
+          env:
+            - name: VAULT_ADDR
+              value: {{ .Values.vault.addr | quote }}
+            - name: VAULT_TOKEN
+              value: {{ .Values.vault.token | quote }}
+          command: ["/bin/sh", "-lc"]
+          args:
+            - >-
+              until vault status >/dev/null 2>&1; do sleep 2; done;
+              vault kv put secret/notification-service resend.api-key="${RESEND_API_KEY}" &&
+              vault kv put secret/user-service keycloak.client-secret="${KEYCLOAK_CLIENT_SECRET}" &&
+              vault kv put secret/event-service dadata.token="${DADATA_TOKEN}"
+              spring.datasource.username=postgres spring.datasource.password="${EVENT_DB_PASSWORD}" &&
+              vault kv put secret/event-registration-service
+              spring.datasource.username=postgres spring.datasource.password="${REGISTRATION_DB_PASSWORD}" &&
+              vault kv put secret/participant-service
+              spring.datasource.username=postgres spring.datasource.password="${PARTICIPANT_DB_PASSWORD}" &&
+              echo "vault seeded"

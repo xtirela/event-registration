@@ -1,0 +1,5 @@
+apiVersion: v2
+name: api-gateway
+description: API gateway for the event platform (routes, retry, circuit breaker).
+type: application
+version: 0.1.0

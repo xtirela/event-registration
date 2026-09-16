@@ -87,7 +87,7 @@ services:
 
   event-registration-service:
     build: ./event-registration-service
-    image: eventreg/event-registration-service:local
+    image:  event-registration-service:local
     container_name: event-registration-service
     mem_swappiness: 0
     mem_limit: 512m

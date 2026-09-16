@@ -1,0 +1,57 @@
+# Keycloak for the oauth realm. DB = the postgres-kc instance (installed from
+# deploy/charts/postgres with values/keycloak.yaml).
+#
+# The realm is auto-created on first boot by mounting the exported realm.json
+# (deploy/charts/keycloak/realm/realm.json) into /opt/keycloak/data/import and
+# passing --import-realm. Keycloak skips import on subsequent starts (realm
+# already exists), so re-deploys are safe.
+#
+# Install:
+#   helm install keycloak deploy/charts/keycloak -n eventreg
+#
+# Services validate JWTs against http://keycloak:8080/realms/oauth; expose the
+# admin console locally via: kubectl port-forward -n eventreg svc/keycloak 9090:8080
+
+fullnameOverride: keycloak
+
+image:
+  repository: quay.io/keycloak/keycloak
+  tag: "26.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+realm:
+  # Name of the ConfigMap holding realm.json (created manually above).
+  configMapName: keycloak-realm
+
+db:
+  # postgres-kc statefulset (see deploy/charts/postgres/values/keycloak.yaml)
+  host: postgres-kc
+  port: 5432
+  database: keycloak
+  schema: public
+  user: postgres
+  # Password comes from the vault-seed Secret (same .env lineage as Vault).
+  passwordSecretName: vault-seed
+  passwordSecretKey: KEYCLOAK_DB_PASSWORD
+
+# In-cluster hostname, matches what services use as JWT issuer
+# (http://keycloak:8080/realms/oauth). Admin console via port-forward.
+hostname: http://keycloak:8080
+
+admin:
+  user: admin
+  password: admin
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi

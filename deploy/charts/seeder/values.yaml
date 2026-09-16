@@ -1,0 +1,16 @@
+image:
+  repository: hashicorp/vault
+  tag: latest
+  pullPolicy: IfNotPresent
+
+vault:
+  # Cluster DNS of the vault Service
+  addr: http://vault:8200
+  token: root-token
+
+seed:
+  # K8s Secret holding secrets from .env (create once via:
+  #   kubectl create secret generic vault-seed --from-env-file=.env
+  # Keys := RESEND_API_KEY, KEYCLOAK_CLIENT_SECRET, DADATA_TOKEN,
+  #         EVENT_DB_PASSWORD, REGISTRATION_DB_PASSWORD, PARTICIPANT_DB_PASSWORD
+  secretName: vault-seed

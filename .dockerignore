@@ -19,7 +19,7 @@ docker-compose.yaml
 .dockerignore
 
 # Логи и временные файлы
-*.log
+*.log`
 *.tmp
 
 # AI

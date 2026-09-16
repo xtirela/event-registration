@@ -1,0 +1,9 @@
+# Non-secret runtime config for notification-service.
+# Secrets stay in Vault (project convention: secrets are never stored in K8s).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "notification-service.fullname" . }}
+  namespace: eventreg
+data:
+  vault-uri: {{ .Values.vault.uri | quote }}

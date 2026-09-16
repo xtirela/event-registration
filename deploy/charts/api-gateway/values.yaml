@@ -1,0 +1,35 @@
+# api-gateway in k8s. Single public entry point: routes /register,/login to
+# user-service, /participants/** to participant-service, /events/** to
+# event-service, /registrations/** to event-registration-service. JWT
+# validated here; the underlying services see the same Bearer via forwarded
+# headers. No DB, no Vault (issuer + peers only).
+#
+# Install:
+#   helm install api-gateway deploy/charts/api-gateway -n eventreg
+
+replicaCount: 1
+
+image:
+  repository: eventreg/api-gateway
+  tag: latest
+  pullPolicy: IfNotPresent
+
+keycloak:
+  issuerUri: http://keycloak:8080/realms/oauth
+
+# Peer services (Relaxed binding: user.service.url -> USER_SERVICE_URL, etc).
+userServiceUrl: http://user-service:8085
+participantServiceUrl: http://participant-service:8081
+eventServiceUrl: http://event-service:8082
+eventRegistrationServiceUrl: http://event-registration-service:8083
+
+service:
+  port: 8080
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

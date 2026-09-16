@@ -1,0 +1,21 @@
+replicaCount: 1
+
+image:
+  repository: hashicorp/vault
+  tag: latest
+  pullPolicy: IfNotPresent
+
+vault:
+  # Matches compose: VAULT_DEV_ROOT_TOKEN_ID=${VAULT_TOKEN:-root-token}
+  token: root-token
+
+service:
+  port: 8200
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi

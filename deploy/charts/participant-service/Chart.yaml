@@ -1,0 +1,5 @@
+apiVersion: v2
+name: participant-service
+description: Participant management microservice.
+type: application
+version: 0.1.0
