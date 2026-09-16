@@ -1,0 +1,5 @@
+fullnameOverride: postgres-participant
+database: participant_service_db
+secret:
+  name: vault-seed
+  key: PARTICIPANT_DB_PASSWORD

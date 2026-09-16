@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "notification-service.fullname" . }}
+  namespace: eventreg
+  labels:
+    app: {{ include "notification-service.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "notification-service.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "notification-service.fullname" . }}
+    spec:
+      serviceAccountName: {{ include "notification-service.fullname" . }}
+      containers:
+        - name: notification-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              name: http
+          env:
+            - name: SPRING_CLOUD_VAULT_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "notification-service.fullname" . }}
+                  key: vault-uri
+            - name: VAULT_TOKEN
+              value: {{ .Values.vault.token | quote }}
+            {{- if .Values.secrets.resendApiKey }}
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "notification-service.fullname" . }}
+                  key: resend-api-key
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

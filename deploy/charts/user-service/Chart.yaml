@@ -1,0 +1,5 @@
+apiVersion: v2
+name: user-service
+description: User auth facade (Keycloak register/login, no DB).
+type: application
+version: 0.1.0

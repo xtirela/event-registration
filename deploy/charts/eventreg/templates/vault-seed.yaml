@@ -1,0 +1,14 @@
+{{- $seed := .Values.vaultSeed }}
+{{- if not $seed }}
+{{- fail "vaultSeed is required: render with -f <generated-from-.env> (see install.sh)" }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-seed
+  namespace: eventreg
+type: Opaque
+stringData:
+  {{- range $k, $v := $seed }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

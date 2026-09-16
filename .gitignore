@@ -44,3 +44,4 @@ bin/
 ### Persistence ###
 data/
 .env
+/deploy/charts/keycloak/realm/realm.json

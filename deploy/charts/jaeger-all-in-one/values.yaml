@@ -1,0 +1,34 @@
+# Jaeger all-in-one (UI + OTLP collector + storage in one process).
+# Deployed standalone (NOT as an umbrella dependency) like kube-prometheus-stack.
+#
+# Services export traces via OTLP HTTP to http://jaeger:4318/v1/traces when their
+# chart's otlpEndpoint value is set (event-service, event-registration-service).
+#
+# UI access (no ingress):
+#   kubectl -n eventreg port-forward svc/jaeger 16686:16686
+# then open http://127.0.0.1:16686
+fullnameOverride: jaeger
+
+# OTLP HTTP (4318) + OTLP gRPC (4317) collectors on the Service; also sets
+# COLLECTOR_OTLP_ENABLED=true on the container.
+enableHttpOpenTelemetryCollector: true
+
+# ponytail: in-memory storage, traces lost on restart. Switch to badger/volume
+# (chart default) or an external store when persistence matters.
+environmentVariables:
+  SPAN_STORAGE_TYPE: memory
+  MEMORY_MAX_TRACES: 100000
+
+volume:
+  enabled: false
+
+service:
+  type: ClusterIP
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

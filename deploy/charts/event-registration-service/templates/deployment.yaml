@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "event-registration-service.fullname" . }}
+  namespace: eventreg
+  labels:
+    app: {{ include "event-registration-service.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "event-registration-service.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "event-registration-service.fullname" . }}
+    spec:
+      serviceAccountName: {{ include "event-registration-service.fullname" . }}
+      containers:
+        - name: event-registration-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              name: http
+          env:
+            - name: SPRING_CLOUD_VAULT_URI
+              value: {{ .Values.vault.uri | quote }}
+            - name: SPRING_CLOUD_VAULT_TOKEN
+              value: {{ .Values.vault.token | quote }}
+            - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
+              value: {{ .Values.keycloak.issuerUri | quote }}
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://{{ .Values.datasource.host }}:{{ .Values.datasource.port }}/{{ .Values.datasource.database }}"
+            - name: EVENT_SERVICE_URL
+              value: {{ .Values.eventServiceUrl | quote }}
+            - name: PARTICIPANT_SERVICE_URL
+              value: {{ .Values.participantServiceUrl | quote }}
+            {{- with .Values.otlpEndpoint }}
+            - name: OTLP_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 65
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 65
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

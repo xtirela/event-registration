@@ -15,5 +15,14 @@ spring:
 resend:
   api-key: ${resend.api-key}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
 server:
   port: 8084

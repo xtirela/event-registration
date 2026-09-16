@@ -1,0 +1,28 @@
+# Standalone Elasticsearch release (install.sh deploys it first, the umbrella
+# then attaches Kibana/Fluent-Bit to it). Mirrors the elasticsearch: block that
+# used to live in values.yaml; keep the two in sync.
+clusterName: elasticsearch
+nodeGroup: master
+replicas: 1
+minimumMasterNodes: 1
+roles:
+  - master
+  - data
+image: docker.elastic.co/elasticsearch/elasticsearch
+imageTag: 8.5.1
+esJavaOpts: "-Xms256m -Xmx256m"
+resources:
+  requests:
+    cpu: 500m
+    memory: 3Gi
+  limits:
+    cpu: 500m
+    memory: 3Gi
+volumeClaimTemplate:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 9Gi
+createCert: true
+secret:
+  enabled: true

@@ -1,0 +1,44 @@
+# event-service in k8s. Needs: postgres-event (postgres chart, values/event.yaml),
+# vault + seeder (already running), keycloak (JWT issuer), notification-service.
+#
+# Install:
+#   helm install event-service deploy/charts/event-service -n eventreg
+
+replicaCount: 1
+
+image:
+  repository: eventreg/event-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+vault:
+  uri: http://vault:8200
+  token: root-token
+
+keycloak:
+  issuerUri: http://keycloak:8080/realms/oauth
+
+datasource:
+  # host = postgres-event StatefulSet Service (postgres chart, values/event.yaml)
+  host: postgres-event
+  port: 5432
+  database: event_service_db
+
+# Peer services (Feign clients). Relaxed binding maps these to
+# event.registration.service.url and notification.service.url.
+eventRegistrationServiceUrl: http://event-registration-service:8083
+notificationServiceUrl: http://notification-service:8084
+
+# OpenTelemetry: exports traces to Jaeger via OTLP HTTP (http://jaeger:4318/v1/traces).
+otlpEndpoint: http://jaeger:4318/v1/traces
+
+service:
+  port: 8082
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
