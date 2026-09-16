@@ -1,6 +1,7 @@
 # AGENTS.md
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 Микросервисный проект «Модуль 6». Legacy-монолит из корня **удалён** — нет `src/`, корневых
 `build.gradle`/`settings.gradle`/`gradlew`/`gradle.properties`. Репозиторий — 6 независимых
 Spring Boot сервисов. Работаем строго внутри каталога каждого сервиса.
@@ -121,6 +122,10 @@ account с ролью `manage-users` для Admin API; секрет — `secret/
 =======
 Spring Boot monolith for event registration. PostgreSQL + Liquibase, Spring Security with JWT, OpenAPI/Swagger.
 
+=======
+Spring Boot monolith for event registration. PostgreSQL + Liquibase, Spring Security with JWT, OpenAPI/Swagger.
+
+>>>>>>> develop
 ## Commands
 
 - Build: `./gradlew build`
@@ -172,4 +177,7 @@ checkstyle → compile → test → jacoco report
 - Exceptions extend `EventRegException` (RuntimeException)
 - Validation throws exceptions, not DTOs
 - Keep service interfaces clean — implementations hold state
+<<<<<<< HEAD
 >>>>>>> e940c8e (feat(infra): fixed agents md)
+=======
+>>>>>>> develop
